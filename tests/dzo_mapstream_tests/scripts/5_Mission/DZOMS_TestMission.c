@@ -3,6 +3,7 @@ class DZOMS_TestSuites
 	static void RunAll()
 	{
 		DZOMS_Test_Smoke.Run();
+		DZOMS_Test_Sha256.Run();
 	}
 }
 
