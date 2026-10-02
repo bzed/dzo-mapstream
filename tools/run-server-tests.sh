@@ -80,6 +80,10 @@ scenario_boot() {
 	mod=$(module_count "$BUILD/last-boot-mod.log" Game)
 	echo "Game module files: vanilla+Dabs $base, with mod $mod"
 	if [ -z "$base" ] || [ -z "$mod" ] || [ "$mod" -le "$base" ]; then echo "mod scripts not loaded (Game)"; return 1; fi
+	base=$(module_count "$BUILD/last-boot-vanilla.log" World)
+	mod=$(module_count "$BUILD/last-boot-mod.log" World)
+	echo "World module files: vanilla+Dabs $base, with mod $mod"
+	if [ -z "$base" ] || [ -z "$mod" ] || [ "$mod" -le "$base" ]; then echo "mod scripts not loaded (World)"; return 1; fi
 	base=$(module_count "$BUILD/last-boot-vanilla.log" Mission)
 	mod=$(module_count "$BUILD/last-boot-mod.log" Mission)
 	echo "Mission module files: vanilla+Dabs $base, with mod $mod"

@@ -18,7 +18,7 @@ class CfgMods
 		author = "";
 		version = "1.0";
 		type = "mod";
-		dependencies[] = {"Game", "Mission"};
+		dependencies[] = {"Game", "World", "Mission"};
 
 		class defs
 		{
@@ -26,6 +26,11 @@ class CfgMods
 			{
 				value = "";
 				files[] = {"dzo_mapstream/scripts/3_Game"};
+			};
+			class worldScriptModule
+			{
+				value = "";
+				files[] = {"dzo_mapstream/scripts/4_World"};
 			};
 			class missionScriptModule
 			{
