@@ -10,6 +10,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_Config.Run();
 		DZOMS_Test_Rules.Run();
 		DZOMS_Test_Probe.Run();
+		DZOMS_Test_BatchBuilder.Run();
 	}
 }
 
