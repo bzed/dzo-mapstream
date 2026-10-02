@@ -48,6 +48,13 @@ class DZOMS_ClientWorld
 	static const int PAUSE_MS = 30000;
 	static const int MAX_TIMEOUTS = 5;
 	static const int MANIFEST_WARN_AFTER = 10;
+	static const int DISTANCE_INTERVAL_MS = 250;
+	static const float UNLOAD_HYSTERESIS = 200;
+	static const int SPAWNS_PER_FRAME = 100;
+	static const int DELETES_PER_FRAME = 200;
+	static const int PROXY_INTERVAL_MS = 1000;
+	static const int PROXIES_PER_FRAME = 50;
+	static const float PROXY_HYSTERESIS = 50;
 
 	// test seam: when set, requests are recorded here instead of being sent
 	bool m_Offline;
@@ -74,6 +81,15 @@ class DZOMS_ClientWorld
 	protected int m_Timeouts;
 	protected bool m_Paused;
 	protected int m_PausedUntil;
+
+	protected bool m_HaveDistances;
+	protected int m_LastDistances;
+	protected ref map<string, bool> m_FailedTypes = new map<string, bool>();
+	protected bool m_ProxyStarted;
+	protected bool m_ProxyActive;
+	protected int m_ProxyBatch;
+	protected int m_ProxyPos;
+	protected int m_LastProxyPass;
 
 	void DZOMS_ClientWorld(string cachePath)
 	{
@@ -191,6 +207,309 @@ class DZOMS_ClientWorld
 		}
 
 		DownloadStep(nowMs);
+		if (m_Batches.Count() == 0)
+		{
+			return;
+		}
+		UpdateDistances(nowMs);
+		SpawnStep();
+		UnloadStep();
+		ProxyStep(nowMs);
+	}
+
+	bool IsFailedType(string type)
+	{
+		return m_FailedTypes.Contains(type);
+	}
+
+	protected void MarkFailed(string type)
+	{
+		if (!m_FailedTypes.Contains(type))
+		{
+			m_FailedTypes.Set(type, true);
+			DZOMS_Log.Warn("cannot spawn " + type + " (content mod missing?), skipped from now on");
+		}
+	}
+
+	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
+	static Object SpawnLocal(string type, vector pos, vector ori, float scale)
+	{
+		if (DZOMS_TypeName.IsModel(type))
+		{
+			return g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+		}
+		Object obj = g_Game.CreateObjectEx(type, pos, ECE_LOCAL | ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME);
+		if (!obj)
+		{
+			return null;
+		}
+		obj.SetOrientation(ori);
+		if (scale != 1)
+		{
+			obj.SetScale(scale);
+		}
+		obj.Update();
+		return obj;
+	}
+
+	// a networked object of that type at that position (within 5 cm), other than exclude
+	static bool NetworkedInstancePresent(string type, vector pos, Object exclude)
+	{
+		array<Object> found = new array<Object>();
+		g_Game.GetObjectsAtPosition3D(pos, 0.5, found, null);
+		string want = DZOMS_TypeName.Of(type);
+		for (int i = 0; i < found.Count(); i++)
+		{
+			Object o = found.Get(i);
+			if (!o || o == exclude)
+			{
+				continue;
+			}
+			int low, high;
+			o.GetNetworkID(low, high);
+			if (low == 0 && high == 0)
+			{
+				continue;
+			}
+			if (vector.Distance(o.GetPosition(), pos) > 0.05)
+			{
+				continue;
+			}
+			if (DZOMS_TypeName.Of(o.GetType()) == want || DZOMS_TypeName.Of(o.GetShapeName()) == want)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	protected void UpdateDistances(int nowMs)
+	{
+		if (m_HaveDistances && (nowMs - m_LastDistances) < DISTANCE_INTERVAL_MS)
+		{
+			return;
+		}
+		m_HaveDistances = true;
+		m_LastDistances = nowMs;
+		float view = m_Manifest.viewDistance;
+		for (int i = 0; i < m_Batches.Count(); i++)
+		{
+			DZOMS_ClientBatch cb = m_Batches.Get(i);
+			if (cb.state == DZOMS_ClientBatch.NOT_RECEIVED)
+			{
+				continue;
+			}
+			cb.distance = Math.Max(0, vector.Distance(m_Camera, cb.center) - cb.radius);
+			if ((cb.state == DZOMS_ClientBatch.UNLOADED || cb.state == DZOMS_ClientBatch.UNLOADING) && cb.distance <= view)
+			{
+				cb.state = DZOMS_ClientBatch.LOADING;
+				cb.cursor = 0;
+			}
+			else if ((cb.state == DZOMS_ClientBatch.LOADED || cb.state == DZOMS_ClientBatch.LOADING) && cb.distance > view + UNLOAD_HYSTERESIS)
+			{
+				cb.state = DZOMS_ClientBatch.UNLOADING;
+				cb.unloadCursor = cb.objects.Count() - 1;
+			}
+		}
+	}
+
+	// the batch in the given state with the smallest (or largest) distance, -1 if none
+	protected int PickBatch(int state, bool nearest)
+	{
+		int best = -1;
+		float bestDistance = 0;
+		for (int i = 0; i < m_Batches.Count(); i++)
+		{
+			DZOMS_ClientBatch cb = m_Batches.Get(i);
+			if (cb.state != state)
+			{
+				continue;
+			}
+			bool better = best < 0 || (nearest && cb.distance < bestDistance) || (!nearest && cb.distance > bestDistance);
+			if (better)
+			{
+				best = i;
+				bestDistance = cb.distance;
+			}
+		}
+		return best;
+	}
+
+	// at most SPAWNS_PER_FRAME spawn attempts per frame, nearest LOADING batch first
+	protected void SpawnStep()
+	{
+		int budget = SPAWNS_PER_FRAME;
+		while (budget > 0)
+		{
+			int pick = PickBatch(DZOMS_ClientBatch.LOADING, true);
+			if (pick < 0)
+			{
+				return;
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(pick);
+			int count = cb.data.Count();
+			while (cb.cursor < count && budget > 0)
+			{
+				int i = cb.cursor;
+				cb.cursor++;
+				if (cb.data.IsNetworked(i) || cb.objects.Get(i))
+				{
+					continue;
+				}
+				string type = cb.data.GetType(i);
+				if (m_FailedTypes.Contains(type))
+				{
+					continue;
+				}
+				budget--;
+				Object o = SpawnLocal(type, cb.data.positions.Get(i), cb.data.orientations.Get(i), cb.data.scales.Get(i));
+				if (o)
+				{
+					cb.objects.Set(i, o);
+				}
+				else
+				{
+					MarkFailed(type);
+				}
+			}
+			if (cb.cursor >= count)
+			{
+				cb.state = DZOMS_ClientBatch.LOADED;
+			}
+		}
+	}
+
+	// at most DELETES_PER_FRAME deleted objects and proxies per frame, farthest UNLOADING batch first
+	protected void UnloadStep()
+	{
+		int budget = DELETES_PER_FRAME;
+		while (budget > 0)
+		{
+			int pick = PickBatch(DZOMS_ClientBatch.UNLOADING, false);
+			if (pick < 0)
+			{
+				return;
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(pick);
+			while (cb.unloadCursor >= 0 && budget > 0)
+			{
+				int i = cb.unloadCursor;
+				cb.unloadCursor--;
+				Object o = cb.objects.Get(i);
+				if (o)
+				{
+					g_Game.ObjectDelete(o);
+					cb.objects.Set(i, null);
+					budget--;
+				}
+				Object p = cb.proxies.Get(i);
+				if (p)
+				{
+					g_Game.ObjectDelete(p);
+					cb.proxies.Set(i, null);
+					budget--;
+				}
+			}
+			if (cb.unloadCursor < 0)
+			{
+				cb.state = DZOMS_ClientBatch.UNLOADED;
+			}
+		}
+	}
+
+	// a pass over the networked entries of LOADED batches every second, PROXIES_PER_FRAME entries per frame
+	protected void ProxyStep(int nowMs)
+	{
+		if (!m_ProxyActive)
+		{
+			if (m_ProxyStarted && (nowMs - m_LastProxyPass) < PROXY_INTERVAL_MS)
+			{
+				return;
+			}
+			m_ProxyStarted = true;
+			m_ProxyActive = true;
+			m_ProxyBatch = 0;
+			m_ProxyPos = 0;
+			m_LastProxyPass = nowMs;
+		}
+
+		int budget = PROXIES_PER_FRAME;
+		while (budget > 0 && m_ProxyBatch < m_Batches.Count())
+		{
+			DZOMS_ClientBatch cb = m_Batches.Get(m_ProxyBatch);
+			if (cb.state != DZOMS_ClientBatch.LOADED || m_ProxyPos >= cb.networked.Count())
+			{
+				m_ProxyBatch++;
+				m_ProxyPos = 0;
+				continue;
+			}
+			ProxyEntry(cb, cb.networked.Get(m_ProxyPos));
+			m_ProxyPos++;
+			budget--;
+		}
+		if (m_ProxyBatch >= m_Batches.Count())
+		{
+			m_ProxyActive = false;
+		}
+	}
+
+	protected void ProxyEntry(DZOMS_ClientBatch cb, int entry)
+	{
+		vector pos = cb.data.positions.Get(entry);
+		string type = cb.data.GetType(entry);
+		float d = vector.Distance(m_Camera, pos);
+		float proxyDistance = m_Manifest.proxyDistance;
+		Object proxy = cb.proxies.Get(entry);
+		if (!proxy)
+		{
+			if (d > proxyDistance + PROXY_HYSTERESIS && !m_FailedTypes.Contains(type) && !NetworkedInstancePresent(type, pos, null))
+			{
+				Object created = SpawnLocal(type, pos, cb.data.orientations.Get(entry), cb.data.scales.Get(entry));
+				if (created)
+				{
+					cb.proxies.Set(entry, created);
+				}
+				else
+				{
+					MarkFailed(type);
+				}
+			}
+			return;
+		}
+		if (d < proxyDistance - PROXY_HYSTERESIS || NetworkedInstancePresent(type, pos, proxy))
+		{
+			g_Game.ObjectDelete(proxy);
+			cb.proxies.Set(entry, null);
+		}
+	}
+
+	// deletes every spawned object and proxy; received batches go back to UNLOADED
+	void Destroy()
+	{
+		for (int i = 0; i < m_Batches.Count(); i++)
+		{
+			DZOMS_ClientBatch cb = m_Batches.Get(i);
+			if (cb.state == DZOMS_ClientBatch.NOT_RECEIVED)
+			{
+				continue;
+			}
+			for (int j = 0; j < cb.objects.Count(); j++)
+			{
+				if (cb.objects.Get(j))
+				{
+					g_Game.ObjectDelete(cb.objects.Get(j));
+					cb.objects.Set(j, null);
+				}
+				if (cb.proxies.Get(j))
+				{
+					g_Game.ObjectDelete(cb.proxies.Get(j));
+					cb.proxies.Set(j, null);
+				}
+			}
+			cb.state = DZOMS_ClientBatch.UNLOADED;
+			cb.cursor = 0;
+			cb.unloadCursor = 0;
+		}
 	}
 
 	protected void DownloadStep(int nowMs)
