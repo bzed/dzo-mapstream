@@ -13,6 +13,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_BatchBuilder.Run();
 		DZOMS_Test_ServerWorld.Run();
 		DZOMS_Test_Requests.Run();
+		DZOMS_Test_ClientDownload.Run();
 	}
 }
 
