@@ -557,6 +557,7 @@ per-batch SHA-256. `disableCache` covers maps that must not be cached at all.
 - Model proxies cannot be listed from script; `IEntity.GetChildren()` is empty for
   map buildings.
 - `local` and `debug` are reserved words (a config key named `debug` cannot be a member; the key is `debugLog`).
+- Map objects (buildings, trees) have non-zero network ids on the server; do not use "has a network id" to tell them from spawned objects.
 - `array<bool>.Resize(n)` does not initialize the new elements to false; insert them explicitly.
 - Integer arithmetic wraps at 32 bits; `>>` sign-extends.
 - Reading a string character by character (`Get(i).ToAscii()`) costs about 2 us
