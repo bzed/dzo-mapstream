@@ -104,7 +104,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
-    "debug": false
+    "debugLog": false
 }
 ```
 
@@ -121,7 +121,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `proxyDistance` | float, m | distance beyond which clients show proxies of networked objects | 1000 |
 | `batchSize` | int | max objects per batch (clamped to 50..1000) | 400 |
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
-| `debug` | bool | log the networked report (5.5) and per-batch details | off |
+| `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
 
 **Every field is designed so that its zero value is the default.** Verified on 1.29:
 `JsonFileLoader<T>.LoadFile()` does not keep the class's initial values for fields
@@ -220,7 +220,7 @@ once per map file.
 
 ### 5.5 Report
 
-With `debug` enabled the server logs, per map file, every networked type with
+With `debugLog` enabled the server logs, per map file, every networked type with
 the number of objects and the rule that decided it:
 
 ```
@@ -556,7 +556,7 @@ per-batch SHA-256. `disableCache` covers maps that must not be cached at all.
 - `Building.GetLaddersCount()` returns 0 for towers; use the `ladder<n>` selection.
 - Model proxies cannot be listed from script; `IEntity.GetChildren()` is empty for
   map buildings.
-- `local` is a reserved word.
+- `local` and `debug` are reserved words (a config key named `debug` cannot be a member; the key is `debugLog`).
 - Integer arithmetic wraps at 32 bits; `>>` sign-extends.
 - Reading a string character by character (`Get(i).ToAscii()`) costs about 2 us
   per character; avoid it in hot paths.

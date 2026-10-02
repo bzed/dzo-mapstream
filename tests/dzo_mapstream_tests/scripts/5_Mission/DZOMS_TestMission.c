@@ -7,6 +7,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_Hasher.Run();
 		DZOMS_Test_Cache.Run();
 		DZOMS_Test_Glob.Run();
+		DZOMS_Test_Config.Run();
 	}
 }
 

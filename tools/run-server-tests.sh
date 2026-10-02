@@ -84,7 +84,7 @@ scenario_boot() {
 	mod=$(module_count "$BUILD/last-boot-mod.log" Mission)
 	echo "Mission module files: vanilla+Dabs $base, with mod $mod"
 	if [ -z "$base" ] || [ -z "$mod" ] || [ "$mod" -le "$base" ]; then echo "mod scripts not loaded (Mission)"; return 1; fi
-	if grep -hE 'SCRIPT.*\(E\)' "$BUILD/last-boot-mod.log"; then return 1; fi
+	if grep -hE 'SCRIPT.*\(E\)' "$BUILD/last-boot-mod.log" | grep -v 'JSON ERROR'; then return 1; fi
 	return 0
 }
 
@@ -93,7 +93,8 @@ scenario_default() {
 	scenario_prepare "$name"
 	run_server "$name" "@DabsFramework;@dzo-mapstream;@dzo-mapstream-tests" '\[dzo-mapstream-test\] DONE' || { echo "$name: no DONE line"; grep -hE 'SCRIPT.*\(E\)|FAIL' "$BUILD/last-$name.log" | head -20; return 1; }
 	local log=$BUILD/last-$name.log
-	if grep -hE 'SCRIPT.*\(E\)' "$log" | head -20 | grep .; then return 1; fi
+	# the engine itself logs "(E): JSON ERROR" when the broken-config case is loaded on purpose
+	if grep -hE 'SCRIPT.*\(E\)' "$log" | grep -v 'JSON ERROR' | head -20 | grep .; then return 1; fi
 	grep -h 'dzo-mapstream-test\] FAIL' "$log"
 	grep -q '\[dzo-mapstream-test\] DONE pass=[0-9]* fail=0$' "$log"
 }
