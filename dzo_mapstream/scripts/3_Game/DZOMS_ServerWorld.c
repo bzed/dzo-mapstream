@@ -94,6 +94,10 @@ class DZOMS_MapReport
 // world objects, builds the batches and the manifest (DESIGN.md 6).
 class DZOMS_ServerWorld
 {
+	static const int ANSWER_NONE = 0;
+	static const int ANSWER_MANIFEST = 1;
+	static const int ANSWER_BATCH = 2;
+
 	protected ref DZOMS_Config m_Config;
 	protected string m_MapsDir;
 	protected ref DZOMS_ObjectProbe m_Probe;
@@ -108,6 +112,7 @@ class DZOMS_ServerWorld
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
 	protected string m_Digest;
 	protected int m_RejectedFiles;
+	protected ref DZOMS_RateLimiter m_RateLimiter = new DZOMS_RateLimiter();
 
 	void DZOMS_ServerWorld(DZOMS_Config config, string mapsDir, DZOMS_ObjectProbe probe)
 	{
@@ -430,6 +435,78 @@ class DZOMS_ServerWorld
 			return;
 		}
 		manager.SuppressMany(m_Suppressed);
+	}
+
+	DZOMS_RateLimiter GetRateLimiter()
+	{
+		return m_RateLimiter;
+	}
+
+	// validation and limits only, no network: tests call this directly
+	int HandleRequest(string senderId, int rpcType, int value, int nowMs)
+	{
+		if (rpcType == DZOMS_Rpc.REQUEST_MANIFEST)
+		{
+			if (!m_RateLimiter.AllowManifest(senderId, nowMs))
+			{
+				return ANSWER_NONE;
+			}
+			if (value != DZOMS_Rpc.PROTOCOL_VERSION)
+			{
+				DZOMS_Log.Warn("client " + senderId + " speaks protocol " + value.ToString() + ", server speaks " + DZOMS_Rpc.PROTOCOL_VERSION.ToString() + ": same mod version needed on both sides");
+				return ANSWER_NONE;
+			}
+			return ANSWER_MANIFEST;
+		}
+		if (rpcType == DZOMS_Rpc.REQUEST_BATCH)
+		{
+			if (value < 0 || value >= m_Batches.Count())
+			{
+				return ANSWER_NONE;
+			}
+			if (!m_RateLimiter.AllowBatch(senderId, nowMs))
+			{
+				return ANSWER_NONE;
+			}
+			return ANSWER_BATCH;
+		}
+		return ANSWER_NONE;
+	}
+
+	void OnRpc(PlayerIdentity sender, int rpcType, ParamsReadContext ctx)
+	{
+		if (!sender)
+		{
+			return;
+		}
+		int value;
+		if (!ctx.Read(value))
+		{
+			return;
+		}
+		int answer = HandleRequest(sender.GetId(), rpcType, value, g_Game.GetTime());
+		if (answer == ANSWER_MANIFEST)
+		{
+			ScriptRPC manifestRpc = new ScriptRPC();
+			manifestRpc.Write(m_Manifest);
+			manifestRpc.Send(null, DZOMS_Rpc.MANIFEST, true, sender);
+		}
+		else if (answer == ANSWER_BATCH)
+		{
+			ScriptRPC batchRpc = new ScriptRPC();
+			batchRpc.Write(m_Batches.Get(value));
+			batchRpc.Send(null, DZOMS_Rpc.BATCH, true, sender);
+		}
+	}
+
+	void OnPlayerDisconnected(string uid)
+	{
+		m_RateLimiter.Remove(uid);
+	}
+
+	void SweepRateLimits(int nowMs)
+	{
+		m_RateLimiter.Sweep(nowMs);
 	}
 
 	// deletes everything this world spawned and unsuppresses the hidden objects (tests)

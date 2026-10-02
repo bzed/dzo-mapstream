@@ -1,5 +1,5 @@
 #!/bin/bash
-# Headless server tests. Usage: tools/run-server-tests.sh [scenario...]   (default: unit)
+# Headless server tests. Usage: tools/run-server-tests.sh [scenario...]   (default: all scenarios)
 # Env: DZOMS_TREE (server tree, default ~/dayz-testserver-dzoms), DZOMS_RUNTIME (seconds, default 120)
 SKILL=/home/bzed/.claude/skills/dayz-dev/scripts
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -9,7 +9,7 @@ BUILD=$ROOT/build
 PROF=$TREE/profiles
 SCEN_DIR=$PROF/dzo-mapstream-tests
 CFG_DIR=$PROF/dzo-mapstream
-[ $# -eq 0 ] && set -- unit
+[ $# -eq 0 ] && set -- boot unit noconfig broken fixtures determinism
 
 "$ROOT/tools/build.sh" >/dev/null || { echo "build failed"; exit 1; }
 "$SKILL/make-server-tree.sh" "$TREE" >/dev/null || { echo "tree failed"; exit 1; }
@@ -69,7 +69,36 @@ scenario_prepare() {
 		mkdir -p "$CFG_DIR/maps"
 		echo '{ "maps": [] }' >"$CFG_DIR/config.json"
 		;;
+	noconfig)
+		rm -rf "$CFG_DIR"
+		;;
+	broken)
+		rm -rf "$CFG_DIR"
+		mkdir -p "$CFG_DIR/maps"
+		echo '{ "maps": [ { "file": "a.dze" } ' >"$CFG_DIR/config.json"
+		cp "$CFG_DIR/config.json" "$SCEN_DIR/config.json.orig"
+		;;
+	fixtures)
+		rm -rf "$CFG_DIR"
+		mkdir -p "$CFG_DIR/maps"
+		write_fixture_config "$2"
+		;;
 	esac
+}
+
+# write_fixture_config <normal|reversed>: the maps themselves are written by the test addon (Prepare)
+write_fixture_config() {
+	local a='{ "file": "fixture_a.dze" }' b='{ "file": "fixture_b.dze", "networked": ["!Land_Container_1Bo"] }' maps
+	maps="$a, $b"
+	[ "$1" = reversed ] && maps="$b, $a"
+	cat >"$CFG_DIR/config.json" <<JSON
+{
+    "maps": [ $maps ],
+    "networked": [ "@doors", "@ladders", "@actions", "@fixedItems", "*Container*" ],
+    "batchSize": 50,
+    "debugLog": true
+}
+JSON
 }
 
 scenario_boot() {
@@ -92,21 +121,51 @@ scenario_boot() {
 	return 0
 }
 
+# scenario_default <log name> <scenario> [config variant]
 scenario_default() {
-	local name=$1
-	scenario_prepare "$name"
+	local name=$1 scenario=${2:-$1}
+	scenario_prepare "$scenario" "$3"
 	run_server "$name" "@DabsFramework;@dzo-mapstream;@dzo-mapstream-tests" '\[dzo-mapstream-test\] DONE' || { echo "$name: no DONE line"; grep -hE 'SCRIPT.*\(E\)|FAIL' "$BUILD/last-$name.log" | head -20; return 1; }
 	local log=$BUILD/last-$name.log
 	# the engine itself logs "(E): JSON ERROR" when the broken-config case is loaded on purpose
 	if grep -hE 'SCRIPT.*\(E\)' "$log" | grep -v 'JSON ERROR' | head -20 | grep .; then return 1; fi
 	grep -h 'dzo-mapstream-test\] FAIL' "$log"
-	grep -q '\[dzo-mapstream-test\] DONE pass=[0-9]* fail=0$' "$log"
+	grep -q '\[dzo-mapstream-test\] DONE pass=[0-9]* fail=0$' "$log" || return 1
+	case "$scenario" in
+	noconfig) [ -f "$CFG_DIR/config.json" ] || { echo "default config.json was not written"; return 1; } ;;
+	broken)
+		cmp "$CFG_DIR/config.json" "$SCEN_DIR/config.json.orig" || { echo "broken config.json was modified"; return 1; }
+		grep -q '\[dzo-mapstream\] ERROR: config error' "$log" || { echo "no config error logged"; return 1; }
+		;;
+	esac
+	return 0
+}
+
+digest_of() {
+	grep -h '\[dzo-mapstream\] ready: digest' "$BUILD/last-$1.log" | tail -1 | sed 's/.*digest //'
+}
+
+# fixtures config twice -> same digest; maps in reverse order -> a different one
+scenario_determinism() {
+	scenario_default determinism-1 fixtures normal || return 1
+	scenario_default determinism-2 fixtures normal || return 1
+	scenario_default determinism-3 fixtures reversed || return 1
+	local d1 d2 d3
+	d1=$(digest_of determinism-1)
+	d2=$(digest_of determinism-2)
+	d3=$(digest_of determinism-3)
+	echo "digests: $d1 $d2 $d3"
+	[ -n "$d1" ] && [ "$d1" = "$d2" ] || { echo "digest differs between identical runs"; return 1; }
+	[ "$d1" != "$d3" ] || { echo "digest did not change with the map order"; return 1; }
+	return 0
 }
 
 status=0
 for s in "$@"; do
 	case "$s" in
 	boot) scenario_boot ;;
+	determinism) scenario_determinism ;;
+	fixtures) scenario_default fixtures fixtures normal ;;
 	*) scenario_default "$s" ;;
 	esac
 	if [ $? -eq 0 ]; then

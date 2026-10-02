@@ -12,6 +12,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_Probe.Run();
 		DZOMS_Test_BatchBuilder.Run();
 		DZOMS_Test_ServerWorld.Run();
+		DZOMS_Test_Requests.Run();
 	}
 }
 
@@ -19,8 +20,14 @@ modded class MissionServer
 {
 	override void OnInit()
 	{
+		string scenario = DZOMS_T.Scenario();
+		DZOMS_Test_Scenarios.Prepare(scenario);
 		super.OnInit();
-		DZOMS_TestSuites.RunAll();
+		DZOMS_Test_Scenarios.Check(scenario);
+		if (scenario == "unit")
+		{
+			DZOMS_TestSuites.RunAll();
+		}
 		DZOMS_T.Done();
 	}
 }
