@@ -548,10 +548,122 @@ Client, in game (cannot be automated):
 
 ## 12. Planned: cache encryption
 
-Not part of the first version. ChaCha20 in Enforce Script with a key the server
-sends in the manifest (never stored on the client) and a random nonce in the cache
-header; the cache stored as one encrypted word array. Integrity stays with the
-per-batch SHA-256. `disableCache` covers maps that must not be cached at all.
+Not part of the first version; a plan ready to implement. ChaCha20 in Enforce
+Script with a key the server sends in the manifest (never stored on the client) and
+a random nonce in the cache header; the cache stored as one encrypted word array.
+Integrity stays with the per-batch SHA-256. `disableCache` covers maps that must not
+be cached at all.
+
+### 12.1 What it protects
+
+Every client that receives the manifest gets the key. That reveals nothing new: the
+same client can download every batch anyway. The point is that a cache file copied
+off a disk (or passed around) is useless without joining the server. A generated
+key's entropy is mostly the creation time (12.4); an admin-set key is the strong
+option.
+
+### 12.2 Measurements (prototype, 1.29 server, 110000 words = about 12k objects)
+
+`TickCount()` returns microseconds (calibrated: 2000002 ticks in 2 s of UTC time).
+
+| Step | Time |
+|---|---|
+| SHA-256 over the words | 147 ms |
+| ChaCha20 over the words | 45 ms |
+| `FileSerializer` read of one `array<int>` | 2.6 ms (write 55 ms) |
+| `int.AsciiToString()` | about 65 ns per character |
+
+For the 1229-object test maps ChaCha20 adds about 5 ms. Loading still gets faster
+than today: the hash input is stored directly (12.3), so no string is read
+character by character (`ToAscii()`, about 2 us per character, section 13).
+
+### 12.3 Cache stores the hash words, not the batch
+
+The plaintext of a batch in the cache is exactly its hash input from 10.1
+(`DZOMS_BatchHasher.Words(b)`), with the per-batch type table packed 4 characters per
+word. Loading hashes these words directly and decodes a batch only when its hash is
+in the manifest.
+
+The words must be kept and written back unchanged; **decoded floats must never be
+re-encoded**. Simulated in float32 (Enforce `float`): `round(float(w / 1000.0) * 1000) == w`
+holds for every |w| up to 8192011 (8192 m) but fails for about 9% of the values
+between 8192 m and 20 km. A batch re-encoded from decoded floats would fail its hash
+on the next join. Scale (`/ 10000`, values up to 20) round-trips exactly.
+
+Decoding (`DZOMS_BatchHasher.Decode(words, start, count)` -> `DZOMS_Batch`): check
+every count and string length against the remaining words before using it, names via
+`AsciiToString()` per byte, positions and orientations `/ 1000.0`, scale `/ 10000.0`.
+Batches whose words hash to a manifest hash are exactly what the server produced,
+so the checks only guard against bugs.
+
+### 12.4 Key and nonce
+
+- Key: 8 ints. `cacheKey` in `config.json` (64 hex characters, optional; empty =
+  generated; invalid = config error, generated key used). Otherwise generated once
+  and kept in `$profile:dzo/mapstream/cachekey.bin` (`FileSerializer`, one
+  `array<int>`). Deleting the file changes the key: every client downloads everything
+  once more.
+- Generation: mix `Math.RandomInt(0, int.MAX)` (two calls per word, 31 bits each),
+  `TickCount(0)`, `GetYearMonthDayUTC`, `GetHourMinuteSecondUTC` and `g_Game.GetTime()`.
+  Do **not** call `Math.Randomize(-1)`: it reseeds the game's shared generator. Not
+  cryptographic quality, enough for 12.1.
+- Nonce: 3 ints, made the same way on the client for every write. It only needs to be
+  unique; a repeat with the same key only leaks the XOR of two cache versions to
+  someone who already has the key.
+
+### 12.5 Format and protocol
+
+```
+int        cacheVersion        // 2
+int[3]     nonce               // three Write(int) calls
+array<int> words               // one Write(array<int>) call, encrypted
+```
+
+Plaintext `words`: a fixed check word (`0x445A4D43`), `batchCount`, then per batch
+its word count and its words (12.3). After decryption a wrong check word means a
+different key: discard the file without hashing anything. One flipped word only
+fails the hash of its batch.
+
+`DZOMS_ChaCha20.XorWords(key, nonce, words)`: RFC 8439 block function, word `i` of the
+data XORed with word `i` of the keystream, block counter from 0. Byte order does not
+matter (only our own words are encrypted), so state words are used as they are.
+Write the state as 16 locals and the 8 quarter rounds out in full (as in
+`DZOMS_Sha256`); generate those lines with a script to avoid typos. Rotation left by
+`n`: `(x << n) | ((x >> (32 - n)) & ((1 << n) - 1))`. Constants
+`1634760805, 857760878, 2036477234, 1797285236`.
+
+Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
+`disableCache` is set). Bump `PROTOCOL_VERSION` and `CACHE_VERSION` to 2.
+
+### 12.6 Changes
+
+| Where | Change |
+|---|---|
+| new `DZOMS_ChaCha20` (3_Game) | `Block(key, nonce, counter, dst)`, `XorWords(key, nonce, words)` |
+| `DZOMS_Sha256` | hash a range of a larger array (`HashWords(words, start, count)`), no copy per batch |
+| `DZOMS_BatchHasher` | `Decode()` (12.3) |
+| `DZOMS_Cache` | version 2 (12.5); reads and writes per-batch word arrays, takes the key |
+| `DZOMS_Manifest`, `DZOMS_Rpc` | `cacheKey`, versions 2 |
+| `DZOMS_Config` + key file | `cacheKey`, generate / load the key (12.4) |
+| `DZOMS_ServerWorld` | key into the manifest |
+| `DZOMS_ClientWorld` | load the cache only when the manifest arrives (the key comes with it; the constructor preload in 8.1 goes away); `DZOMS_ClientBatch` keeps its words (`HandleBatch` already builds them for the hash: keep them); `Complete()` writes the stored words |
+| docs | sections 4, 5, 7, 8, 10.2; `cacheKey` in the README |
+
+### 12.7 Tests
+
+- RFC 8439 2.3.2: key bytes `00..1f` = words `50462976, 117835012, 185207048,
+  252579084, 319951120, 387323156, 454695192, 522067228`, nonce
+  `150994944, 1241513984, 0`, counter 1 ->
+  `e4e7f110 15593bd1 1fdd0f50 c47120a3 c7f4d1c7 0368c033 9aaa2204 4e6cd4c3
+  466482d2 09aa9f07 05d7c214 a2028bd9 d19c12b5 b94e16de e883d0cb 4e3c50a2`
+  (passed in the prototype).
+- A partial last block (e.g. 40 words) against a Python reference; XOR twice restores.
+- Cache round trip with the right key; a wrong key is rejected by the check word; one
+  flipped word drops one batch.
+- Positions beyond 8192 m: write -> read -> write -> read keeps all hashes.
+- Key generated on the first boot, the same on the second; a set `cacheKey` is used,
+  an invalid one is reported.
+- Existing cache tests (truncated, wrong version, random, missing file) for version 2.
 
 ## 13. Enforce Script pitfalls (verified on 1.29)
 
@@ -569,6 +681,11 @@ per-batch SHA-256. `disableCache` covers maps that must not be cached at all.
   per character; avoid it in hot paths.
 - A `PrintFormat()` with nine arguments containing inline comparisons crashed the
   1.29 script compiler (whole server). Compute values into locals first.
+  Also seen: one function holding `(a + b).AsciiToString()`,
+  `(x == n && y == z).ToString()` and `ok = ok && v == (i & m)` segfaulted the server
+  while compiling the Mission module (which of the three was not narrowed down).
+- `out` is a reserved word (not usable as a parameter name).
+- `TickCount(prev)` returns microseconds (calibrated against the UTC clock).
 - Assigning `new` to a function parameter fails to compile ("not strong ref"):
   create objects in locals or store them in a `ref` container first.
 
