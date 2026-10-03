@@ -36,7 +36,7 @@ Update the server's copy whenever the mod is updated on the Workshop, otherwise 
 
 [h2]Checking that it works[/h2]
 
-Open the newest script_*.log in your profiles folder and search for [code][dzo-mapstream][/code] You should see one line per map file and a final "ready" line. If something is wrong, the log says why (lines with WARNING or ERROR).
+Open the newest script_*.log in your profiles folder and search for [code][dzo-mapstream][/code]. You should see one line per map file and a final "ready" line. If something is wrong, the log says why (lines with WARNING or ERROR).
 
 [h2]Settings[/h2]
 
