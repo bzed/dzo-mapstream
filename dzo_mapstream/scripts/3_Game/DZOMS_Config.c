@@ -11,8 +11,8 @@ class DZOMS_MapEntry
 
 class DZOMS_Config
 {
-	static const string PROFILE_DIR = "$profile:dzo-mapstream";
-	static const string MAPS_DIR = "$profile:dzo-mapstream/DZE";
+	static const string PROFILE_DIR = "$profile:dzo/mapstream";
+	static const string MAPS_DIR = "$profile:dzo/mapstream/DZE";
 	static const float DEFAULT_VIEW_DISTANCE = 1500;
 	static const float DEFAULT_PROXY_DISTANCE = 1000;
 	static const int DEFAULT_BATCH_SIZE = 400;
@@ -38,6 +38,27 @@ class DZOMS_Config
 		c.maps = new array<ref DZOMS_MapEntry>();
 		c.networked = {"@doors", "@ladders", "@actions", "@fixedItems", "Land_Underground_Panel*", "*WaterSpring*", "*Switch*", "*Stair*"};
 		return c;
+	}
+
+	// MakeDirectory creates one level only: create every level of "$profile:a/b/c"
+	static void MakeDirs(string path)
+	{
+		array<string> parts = new array<string>();
+		path.Split("/", parts);
+		string current = "";
+		for (int i = 0; i < parts.Count(); i++)
+		{
+			if (parts.Get(i) == "")
+			{
+				continue;
+			}
+			if (current != "")
+			{
+				current += "/";
+			}
+			current += parts.Get(i);
+			MakeDirectory(current);
+		}
 	}
 
 	protected static float NormalizeDistance(float v, float fallback, string name)
@@ -97,7 +118,7 @@ class DZOMS_Config
 	// Invalid JSON: log, leave the file untouched, return an empty config with m_LoadFailed.
 	static DZOMS_Config Load(string dir)
 	{
-		MakeDirectory(dir);
+		MakeDirs(dir);
 		MakeDirectory(dir + "/DZE");
 		string path = dir + "/config.json";
 		string error;

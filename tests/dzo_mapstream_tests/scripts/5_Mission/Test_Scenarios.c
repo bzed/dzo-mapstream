@@ -7,8 +7,7 @@ class DZOMS_Test_Scenarios
 		{
 			return;
 		}
-		MakeDirectory(DZOMS_Config.PROFILE_DIR);
-		MakeDirectory(DZOMS_Config.MAPS_DIR);
+		DZOMS_Config.MakeDirs(DZOMS_Config.MAPS_DIR);
 		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 800";
 
 		EditorSaveData a = new EditorSaveData();

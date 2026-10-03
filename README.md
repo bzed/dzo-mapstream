@@ -12,7 +12,7 @@ Target: DayZ 1.29 and 1.30.
 - Requires the Dabs Framework (Steam Workshop id 2545327648).
 - Load `@dzo-mapstream` with `-mod=` on the **server and on every client**. Server and clients must
   run the same version.
-- Put the map files into `<profiles>/dzo-mapstream/DZE/`. Every `*.dze` file in that folder is
+- Put the map files into `<profiles>/dzo/mapstream/DZE/`. Every `*.dze` file in that folder is
   loaded, in alphabetical order (not case sensitive), nothing has to be listed. The server creates
   the folder and a default `config.json` on the first start.
 - On DayZ 1.30 the server must be started with `-profiles=<dir>` (the folder is found through it).
@@ -22,12 +22,12 @@ Target: DayZ 1.29 and 1.30.
 Server profile (`-profiles=` directory):
 
 ```
-dzo-mapstream/
+dzo/mapstream/
   config.json          the configuration
   DZE/                 every *.dze file in here is loaded
 ```
 
-Client profile: `dzo-mapstream/cache/<address>_<port>.bin`, one cache file per server. Delete the
+Client profile: `dzo/mapstream/cache/<address>_<port>.bin`, one cache file per server. Delete the
 file to clear the cache. A cached batch is only used when its SHA-256 matches the hash the server
 announced.
 
@@ -105,7 +105,7 @@ tools/run-server-tests.sh unit       # one scenario
 The client side cannot be tested headless. Before relying on it:
 
 1. First join downloads closest-first (order of batch requests in the client log), the area around
-   the player is complete first; the cache file appears under `$profile:dzo-mapstream/cache/`.
+   the player is complete first; the cache file appears under `$profile:dzo/mapstream/cache/`.
 2. Second join: the log shows all batches taken from the cache, no download.
 3. Doors open, ladders can be climbed, levers and wells work, shooting range targets (workshop
    3420700027, 3034202210) react to hits and can be reset; decoration items cannot be taken.

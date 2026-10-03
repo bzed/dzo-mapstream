@@ -64,7 +64,7 @@ cache encryption (planned, section 12).
 Server profile (`$profile:` = the `-profiles=` directory):
 
 ```
-dzo-mapstream/
+dzo/mapstream/
   config.json          the configuration (section 5)
   DZE/                 every *.dze file in here is loaded (section 6.1)
 ```
@@ -72,7 +72,7 @@ dzo-mapstream/
 Client profile:
 
 ```
-dzo-mapstream/
+dzo/mapstream/
   cache/<address>_<port>.bin    one cache file per server (section 10)
 ```
 

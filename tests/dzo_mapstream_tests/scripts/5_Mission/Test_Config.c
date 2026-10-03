@@ -41,6 +41,11 @@ class DZOMS_Test_Config
 	{
 		DZOMS_T.Suite("config");
 
+		// nested directories are created level by level
+		string deep = DZOMS_T.DIR + "/nest_a/nest_b";
+		DZOMS_Config.MakeDirs(deep);
+		DZOMS_T.Check(FileExist(deep) || FileExist(deep + "/."), "MakeDirs creates nested directories");
+
 		// missing file: default written and loaded in the same start
 		string dir = CaseDir("missing");
 		DZOMS_Config c = DZOMS_Config.Load(dir);

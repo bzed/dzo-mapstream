@@ -16,7 +16,7 @@ RUNTIME=${DZOMS_RUNTIME:-120}
 BUILD=$ROOT/build
 PROF=$TREE/profiles
 SCEN_DIR=$PROF/dzo-mapstream-tests
-CFG_DIR=$PROF/dzo-mapstream
+CFG_DIR=$PROF/dzo/mapstream
 [ $# -eq 0 ] && set -- boot unit noconfig broken realdze fixtures determinism
 
 "$ROOT/tools/build.sh" >/dev/null || { echo "build failed"; exit 1; }

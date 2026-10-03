@@ -733,7 +733,7 @@ class DZOMS_ClientWorld
 		{
 			list.Insert(m_Batches.Get(i).data);
 		}
-		MakeDirectory(DZOMS_Config.PROFILE_DIR);
+		DZOMS_Config.MakeDirs(DZOMS_Config.PROFILE_DIR);
 		MakeDirectory(DZOMS_Config.PROFILE_DIR + "/cache");
 		if (DZOMS_Cache.Write(m_CachePath, list))
 		{
