@@ -1,5 +1,7 @@
 // Admin configuration (DESIGN.md 5). Every field is designed so that its zero value
 // is the default: JsonFileLoader zero-initializes fields that are missing from the file.
+// Optional per-file settings for a file in the DZE folder. Files without an entry are loaded
+// with the global rules only.
 class DZOMS_MapEntry
 {
 	string file;
@@ -10,6 +12,7 @@ class DZOMS_MapEntry
 class DZOMS_Config
 {
 	static const string PROFILE_DIR = "$profile:dzo-mapstream";
+	static const string MAPS_DIR = "$profile:dzo-mapstream/DZE";
 	static const float DEFAULT_VIEW_DISTANCE = 1500;
 	static const float DEFAULT_PROXY_DISTANCE = 1000;
 	static const int DEFAULT_BATCH_SIZE = 400;
@@ -95,7 +98,7 @@ class DZOMS_Config
 	static DZOMS_Config Load(string dir)
 	{
 		MakeDirectory(dir);
-		MakeDirectory(dir + "/maps");
+		MakeDirectory(dir + "/DZE");
 		string path = dir + "/config.json";
 		string error;
 

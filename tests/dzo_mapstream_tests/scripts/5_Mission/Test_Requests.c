@@ -37,7 +37,7 @@ class DZOMS_Test_Requests
 		DZOMS_T.EqInt(rl.Count(), 0, "Sweep drops idle ids");
 
 		// requests against a world with 2 batches
-		string mapsDir = DZOMS_T.DIR + "/maps";
+		string mapsDir = DZOMS_T.DIR + "/DZE_req";
 		MakeDirectory(DZOMS_T.DIR);
 		MakeDirectory(mapsDir);
 		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 600";

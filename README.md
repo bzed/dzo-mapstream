@@ -12,9 +12,10 @@ Target: DayZ 1.29 and 1.30.
 - Requires the Dabs Framework (Steam Workshop id 2545327648).
 - Load `@dzo-mapstream` with `-mod=` on the **server and on every client**. Server and clients must
   run the same version.
-- Put the map files into `<profiles>/dzo-mapstream/maps/` and list them in
-  `<profiles>/dzo-mapstream/config.json`. The server creates a default `config.json` (no maps) on the
-  first start.
+- Put the map files into `<profiles>/dzo-mapstream/DZE/`. Every `*.dze` file in that folder is
+  loaded, in alphabetical order (not case sensitive), nothing has to be listed. The server creates
+  the folder and a default `config.json` on the first start.
+- On DayZ 1.30 the server must be started with `-profiles=<dir>` (the folder is found through it).
 
 ## Files
 
@@ -23,7 +24,7 @@ Server profile (`-profiles=` directory):
 ```
 dzo-mapstream/
   config.json          the configuration
-  maps/                the .dze files listed in config.json
+  DZE/                 every *.dze file in here is loaded
 ```
 
 Client profile: `dzo-mapstream/cache/<address>_<port>.bin`, one cache file per server. Delete the
@@ -35,7 +36,6 @@ announced.
 ```json
 {
     "maps": [
-        { "file": "onlyup_prisonbreak.dze" },
         { "file": "twistedup.dze", "networked": ["*Container*", "!Land_Container_1Bo"] },
         { "file": "old_event.dze", "disabled": true }
     ],
@@ -52,8 +52,8 @@ Every field's zero (or missing) value means "default".
 
 | Field | Meaning | Default |
 |---|---|---|
-| `maps` | map files in load order | none |
-| `maps[].file` | file name inside `maps/` (no paths) | entry ignored |
+| `maps` | optional per-file settings; files in `DZE/` without an entry are loaded with the global rules | none |
+| `maps[].file` | file name inside `DZE/` (no paths) | entry ignored |
 | `maps[].disabled` | skip this file | loaded |
 | `maps[].networked` | extra rules for this file, after the global ones | none |
 | `networked` | global networked rules | no object is networked |
@@ -64,6 +64,7 @@ Every field's zero (or missing) value means "default".
 | `debugLog` | log the networked report and per-batch details | off |
 
 An invalid `config.json` is reported in the server log and left untouched; no maps are loaded.
+An entry whose file is not in `DZE/` is reported as an error (unless it is `disabled`).
 
 ### Networked rules
 

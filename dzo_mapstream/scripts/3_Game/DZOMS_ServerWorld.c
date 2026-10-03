@@ -107,7 +107,6 @@ class DZOMS_ServerWorld
 	protected ref array<Object> m_Suppressed = new array<Object>();
 	protected ref map<Object, bool> m_SuppressedSet = new map<Object, bool>();
 	protected ref map<string, bool> m_SeenObjects = new map<string, bool>();
-	protected ref map<string, bool> m_SeenFiles = new map<string, bool>();
 	protected ref array<ref DZOMS_Batch> m_Batches = new array<ref DZOMS_Batch>();
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
 	protected string m_Digest;
@@ -199,12 +198,48 @@ class DZOMS_ServerWorld
 		DZOMS_NetworkRules.Parse(m_Config.networked, globalRules, ruleErrors);
 		LogRuleErrors("networked", ruleErrors);
 
-		for (int i = 0; i < m_Config.maps.Count(); i++)
+		map<string, ref DZOMS_MapEntry> overrides = new map<string, ref DZOMS_MapEntry>();
+		CollectOverrides(overrides);
+
+		map<string, bool> used = new map<string, bool>();
+		array<string> files;
+		DZOMS_MapFiles.List(m_MapsDir, files);
+		if (files.Count() == 0)
 		{
-			DZOMS_MapEntry entry = m_Config.maps.Get(i);
-			if (entry)
+			DZOMS_Log.Info("no .dze files in " + m_MapsDir);
+		}
+		for (int i = 0; i < files.Count(); i++)
+		{
+			string file = files.Get(i);
+			string key = file;
+			key.ToLower();
+			DZOMS_MapEntry entry = overrides.Get(key);
+			if (entry && entry.disabled)
 			{
-				LoadMap(entry, globalRules);
+				DZOMS_Log.Info("map " + file + " is disabled");
+			}
+			else
+			{
+				LoadMap(file, entry, globalRules);
+			}
+			used.Set(key, true);
+		}
+		// an entry that matched no file in the DZE folder
+		for (int u = 0; u < overrides.Count(); u++)
+		{
+			DZOMS_MapEntry unused = overrides.GetElement(u);
+			string unusedKey = overrides.GetKey(u);
+			if (used.Contains(unusedKey))
+			{
+				continue;
+			}
+			if (unused.disabled)
+			{
+				DZOMS_Log.Info("map " + unused.file + " is disabled");
+			}
+			else
+			{
+				Reject(true, "config: maps entry '" + unused.file + "' has no file in " + m_MapsDir);
 			}
 		}
 
@@ -263,33 +298,40 @@ class DZOMS_ServerWorld
 		}
 	}
 
-	protected void LoadMap(DZOMS_MapEntry entry, array<ref DZOMS_Rule> globalRules)
+	// maps[] entries by lower case file name; invalid and duplicate entries are rejected
+	protected void CollectOverrides(map<string, ref DZOMS_MapEntry> overrides)
 	{
-		string file = entry.file;
-		if (file == "")
+		for (int i = 0; i < m_Config.maps.Count(); i++)
 		{
-			Reject(false, "config: a map entry has no file, ignored");
-			return;
+			DZOMS_MapEntry entry = m_Config.maps.Get(i);
+			if (!entry)
+			{
+				continue;
+			}
+			string file = entry.file;
+			if (file == "")
+			{
+				Reject(false, "config: a maps entry has no file, ignored");
+				continue;
+			}
+			if (file.Contains("..") || file.Contains("/") || file.Contains("\\") || file.Contains(":"))
+			{
+				Reject(true, "config: maps file '" + file + "' must be a plain file name inside DZE/, ignored");
+				continue;
+			}
+			string lower = file;
+			lower.ToLower();
+			if (overrides.Contains(lower))
+			{
+				Reject(false, "config: maps file '" + file + "' is listed twice, ignored");
+				continue;
+			}
+			overrides.Set(lower, entry);
 		}
-		if (entry.disabled)
-		{
-			DZOMS_Log.Info("map " + file + " is disabled");
-			return;
-		}
-		if (file.Contains("..") || file.Contains("/") || file.Contains("\\") || file.Contains(":"))
-		{
-			Reject(true, "config: map file '" + file + "' must be a plain file name inside maps/, ignored");
-			return;
-		}
-		string lower = file;
-		lower.ToLower();
-		if (m_SeenFiles.Contains(lower))
-		{
-			Reject(false, "config: map file '" + file + "' is listed twice, ignored");
-			return;
-		}
-		m_SeenFiles.Set(lower, true);
+	}
 
+	protected void LoadMap(string file, DZOMS_MapEntry entry, array<ref DZOMS_Rule> globalRules)
+	{
 		string path = m_MapsDir + "/" + file;
 		if (!FileExist(path))
 		{
@@ -305,7 +347,10 @@ class DZOMS_ServerWorld
 
 		array<ref DZOMS_Rule> mapRules = new array<ref DZOMS_Rule>();
 		array<string> ruleErrors = new array<string>();
-		DZOMS_NetworkRules.Parse(entry.networked, mapRules, ruleErrors);
+		if (entry)
+		{
+			DZOMS_NetworkRules.Parse(entry.networked, mapRules, ruleErrors);
+		}
 		LogRuleErrors(file, ruleErrors);
 		DZOMS_NetworkRules rules = DZOMS_NetworkRules.Combine(globalRules, mapRules);
 

@@ -48,7 +48,7 @@ class DZOMS_Test_ServerWorld
 	{
 		DZOMS_T.Suite("serverworld");
 		DZOMS_NetworkRules.ClearTokenCache();
-		string mapsDir = DZOMS_T.DIR + "/maps";
+		string mapsDir = DZOMS_T.DIR + "/DZE_world";
 		MakeDirectory(DZOMS_T.DIR);
 		MakeDirectory(mapsDir);
 		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 400";

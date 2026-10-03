@@ -8,7 +8,7 @@ modded class MissionServer
 
 		DZOMS_Config config = DZOMS_Config.Load(DZOMS_Config.PROFILE_DIR);
 		DZOMS_ObjectProbe probe = new DZOMS_ObjectProbeWorld();
-		DZOMS_ServerWorld world = new DZOMS_ServerWorld(config, DZOMS_Config.PROFILE_DIR + "/maps", probe);
+		DZOMS_ServerWorld world = new DZOMS_ServerWorld(config, DZOMS_Config.MAPS_DIR, probe);
 		// registered before Load(): requests are only answered once the world exists, but tests look it up early
 		GetDayZGame().DZOMS_SetServerWorld(world);
 		world.Load();

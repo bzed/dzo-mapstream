@@ -8,7 +8,7 @@ class DZOMS_Test_Scenarios
 			return;
 		}
 		MakeDirectory(DZOMS_Config.PROFILE_DIR);
-		MakeDirectory(DZOMS_Config.PROFILE_DIR + "/maps");
+		MakeDirectory(DZOMS_Config.MAPS_DIR);
 		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 800";
 
 		EditorSaveData a = new EditorSaveData();
@@ -22,7 +22,16 @@ class DZOMS_Test_Scenarios
 			int row = i / 10;
 			DZOMS_TestFixtures.AddObject(a, "Apple", at + Vector(col * 10, 0, 100 + row * 10), "0 0 0", 1, 0);
 		}
-		DZOMS_TestFixtures.Save(a, DZOMS_Config.PROFILE_DIR + "/maps/fixture_a.dze");
+		// "reversed": the same contents under swapped names, so the alphabetical load order flips
+		bool reversed = FileExist(DZOMS_T.DIR + "/reversed");
+		string nameA = "fixture_a.dze";
+		string nameB = "fixture_b.dze";
+		if (reversed)
+		{
+			nameA = "fixture_b.dze";
+			nameB = "fixture_a.dze";
+		}
+		DZOMS_TestFixtures.Save(a, DZOMS_Config.MAPS_DIR + "/" + nameA);
 
 		EditorSaveData b = new EditorSaveData();
 		DZOMS_TestFixtures.AddObject(b, "Land_Container_1Bo", at + "90 0 0", "0 0 0", 1, 0);
@@ -30,7 +39,7 @@ class DZOMS_Test_Scenarios
 		{
 			DZOMS_TestFixtures.AddObject(b, "Apple", at + Vector(400 + j, 0, 0), "0 0 0", 1, 0);
 		}
-		DZOMS_TestFixtures.Save(b, DZOMS_Config.PROFILE_DIR + "/maps/fixture_b.dze");
+		DZOMS_TestFixtures.Save(b, DZOMS_Config.MAPS_DIR + "/" + nameB);
 	}
 
 	static void Check(string scenario)
@@ -60,6 +69,24 @@ class DZOMS_Test_Scenarios
 		{
 			DZOMS_T.Check(c.m_LoadFailed, "broken config flagged");
 			DZOMS_T.EqInt(w.GetObjects().Count(), 0, "no objects");
+		}
+		else if (scenario == "realdze")
+		{
+			// tests/dze/*.dze: a file written by the real DayZ Editor, found in the DZE folder
+			DZOMS_T.Check(!c.m_LoadFailed, "config loaded");
+			DZOMS_T.EqInt(w.GetRejectedFiles(), 0, "no rejected file");
+			DZOMS_T.Check(w.GetObjects().Count() > 0, "objects loaded from the real .dze: " + w.GetObjects().Count().ToString());
+			DZOMS_T.Check(w.GetBatches().Count() > 0, "batches built");
+			DZOMS_T.EqInt(w.GetManifest().Count(), w.GetBatches().Count(), "one hash per batch");
+			int missing = 0;
+			for (int r = 0; r < w.GetSpawned().Count(); r++)
+			{
+				if (!w.GetSpawned().Get(r))
+				{
+					missing++;
+				}
+			}
+			DZOMS_T.EqInt(missing, 0, "every object spawned");
 		}
 		else if (scenario == "fixtures")
 		{

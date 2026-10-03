@@ -46,7 +46,7 @@ cache encryption (planned, section 12).
 
 ## 3. Terms
 
-- **Map file**: one `.dze` file listed in the config.
+- **Map file**: one `*.dze` file in the `DZE/` folder.
 - **Object**: one entry of `EditorSaveData.EditorObjects` that gets spawned.
 - **Type name**: the object's class name. For objects given as a model path
   (`Type` contains `.p3d`), the file name without directory and `.p3d`,
@@ -66,7 +66,7 @@ Server profile (`$profile:` = the `-profiles=` directory):
 ```
 dzo-mapstream/
   config.json          the configuration (section 5)
-  maps/                the .dze files referenced by config.json
+  DZE/                 every *.dze file in here is loaded (section 6.1)
 ```
 
 Client profile:
@@ -86,7 +86,6 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 ```json
 {
     "maps": [
-        { "file": "onlyup_prisonbreak.dze" },
         { "file": "twistedup.dze", "networked": ["*Container*", "!Land_Container_1Bo"] },
         { "file": "old_event.dze", "disabled": true }
     ],
@@ -112,8 +111,8 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 
 | Field | Type | Meaning | `0` / missing means |
 |---|---|---|---|
-| `maps` | array | map files in load order | no maps |
-| `maps[].file` | string | file name inside `maps/` | entry ignored (warning) |
+| `maps` | array | optional per-file settings; the files themselves come from `DZE/` | no settings |
+| `maps[].file` | string | file name inside `DZE/` | entry ignored (warning) |
 | `maps[].disabled` | bool | skip this file | file is loaded |
 | `maps[].networked` | array of rules | extra rules for this file, appended after the global rules | none |
 | `networked` | array of rules | global networked rules (5.3) | no object is networked |
@@ -235,7 +234,7 @@ config errors.
 ### 5.6 Missing or broken config
 
 - File missing: write the default config (example above with an empty `maps`
-  list), then **load it like any other config**, so defaults are effective on the
+  list; the `DZE/` folder is created, too), then **load it like any other config**, so defaults are effective on the
   very first start.
 - File present but invalid JSON: log the error from `LoadFile()`, leave the file
   untouched, load no maps. Never overwrite an admin's file.
@@ -247,9 +246,15 @@ All server work happens in `MissionServer.OnInit()`, after `super.OnInit()`.
 ### 6.1 Loading
 
 1. Load and normalize the config (5.6).
-2. For each map entry in order: skip `disabled`, reject `file` values containing
-   `..`, `/`, `\` or `:` (files must be inside `maps/`), skip duplicates
-   (case-insensitive) with a warning, check `FileExist`, then
+2. List `DZE/` with `FindFile` (pattern `*`, directories skipped, extension `.dze` in any
+   case). The file system order is not defined, so the names are sorted case-insensitively;
+   that order is the load order and therefore part of the batch hashes. `FindFile` ignores
+   `$profile:` on 1.30 (DZEXP-134): the pattern goes through `DZOMS_FindFilePath` (copy of the
+   dayz-dev skill's helper), which needs `-profiles=` on 1.30. Open files with the `$profile:`
+   path, never with the resolved one.
+   `maps[]` entries are per-file overrides: reject `file` values containing `..`, `/`, `\` or `:`,
+   skip duplicates (case-insensitive) with a warning. A listed file that is `disabled` is
+   skipped; an entry without a file in `DZE/` is an error. Per found file: `FileExist`, then
    `EditorSaveData.LoadFromFile()`. A `NULL` result is logged and the file skipped.
 3. Objects: skip entries that are `NULL`, have an empty `Type`, or have
    `EDITOR_ONLY` set in `Flags`. (`EditorObjectData.EditorOnly` is

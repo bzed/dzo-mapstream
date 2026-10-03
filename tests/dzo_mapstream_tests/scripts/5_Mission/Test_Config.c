@@ -45,7 +45,7 @@ class DZOMS_Test_Config
 		string dir = CaseDir("missing");
 		DZOMS_Config c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(FileExist(dir + "/config.json"), "default config written");
-		DZOMS_T.Check(FileExist(dir + "/maps") || FileExist(dir + "/maps/."), "maps dir created");
+		DZOMS_T.Check(FileExist(dir + "/DZE") || FileExist(dir + "/DZE/."), "DZE dir created");
 		DZOMS_T.Check(!c.m_LoadFailed, "default not failed");
 		DZOMS_T.EqInt(c.maps.Count(), 0, "default has no maps");
 		DZOMS_T.EqInt(c.networked.Count(), 8, "8 default rules");

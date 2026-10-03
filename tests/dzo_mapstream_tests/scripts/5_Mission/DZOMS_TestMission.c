@@ -8,6 +8,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_Cache.Run();
 		DZOMS_Test_Glob.Run();
 		DZOMS_Test_Config.Run();
+		DZOMS_Test_MapFiles.Run();
 		DZOMS_Test_Rules.Run();
 		DZOMS_Test_Probe.Run();
 		DZOMS_Test_BatchBuilder.Run();
