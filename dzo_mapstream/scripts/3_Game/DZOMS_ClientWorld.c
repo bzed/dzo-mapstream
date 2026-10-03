@@ -429,7 +429,7 @@ class DZOMS_ClientWorld
 						alive++;
 					}
 				}
-				DZOMS_Log.Info("batch " + pick.ToString() + ": loaded, " + alive.ToString() + " local objects spawned of " + count.ToString());
+				DZOMS_Log.Info("batch " + pick.ToString() + ": loaded, " + alive.ToString() + " of " + (count - cb.networked.Count()).ToString() + " local objects spawned (" + cb.networked.Count().ToString() + " networked entries are left to the server)");
 			}
 		}
 	}
