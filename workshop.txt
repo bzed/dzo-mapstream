@@ -1,0 +1,59 @@
+[h1]dzo-mapstream[/h1]
+
+Put big maps made with the DayZ Editor (bases, events, bunkers, shooting ranges, ...) into your server [b]without the usual lag and network load[/b].
+
+You build the map with the DayZ Editor, save it as a [b].dze[/b] file and drop the file into a folder on your server. The mod does the rest.
+
+[b]Supported DayZ versions:[/b] 1.29 and 1.30
+
+[h2]How it works[/h2]
+
+Normally the server keeps track of every object in the world and sends it to every player. Such an object is called [b]networked[/b]. That is needed for everything players use together, for example a door that has to be open or closed for everybody. But it is expensive: a map with thousands of decorative objects (fences, crates, walls, ...) can slow the server down and make players join slowly.
+
+This mod does it differently for most objects:
+
+[list]
+[*] The server sends the map to each player [b]once[/b] as a small block of plain data. The player's game keeps a copy, so the next visit needs no download.
+[*] The server and every player's game then create these objects [b]locally[/b]. They never change, so nothing has to be kept in sync. Zombies and AI treat them as normal, solid objects.
+[*] Objects that must work for everybody (doors, ladders, levers, wells, ...) stay [b]networked[/b]. The mod decides which ones with a list of rules. The defaults cover the usual cases, and you can change them.
+[*] Objects you deleted in the Editor to clear space are hidden in the game, too.
+[*] Players see a part of the map when they come close to it, so the map appears around them as they walk or fly.
+[/list]
+
+[h2]Server owners: quick start[/h2]
+
+[olist]
+[*] Get this mod and the required [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2545327648]Dabs Framework[/url] from the Steam Workshop and put both into your server directory. Your hosting provider's mod manager may do this for you.
+[*] Start the server with both mods in the [b]-mod=[/b] parameter, Dabs Framework first, and with a profiles folder:
+[code]-mod=@DabsFramework;@dzo-mapstream -profiles=profiles[/code]
+Use [b]-mod=[/b], not -servermod=. Players do not have to do anything: the launcher downloads the mod for them automatically.
+[*] If your server checks signatures, copy the .bikey files from the keys folders of both mods into the keys folder of your server.
+[*] Start the server once. It creates the folder [b]dzo/mapstream[/b] inside your profiles folder, with a settings file and an empty folder called [b]DZE[/b].
+[*] Copy your .dze files into [b]<profiles>/dzo/mapstream/DZE/[/b] and restart the server. Every .dze file in that folder is loaded, nothing has to be listed anywhere.
+[/olist]
+
+Update the server's copy whenever the mod is updated on the Workshop, otherwise players cannot load the maps.
+
+[h2]Checking that it works[/h2]
+
+Open the newest script_*.log in your profiles folder and search for [code][dzo-mapstream][/code] You should see one line per map file and a final "ready" line. If something is wrong, the log says why (lines with WARNING or ERROR).
+
+[h2]Settings[/h2]
+
+The file [b]config.json[/b] in the dzo/mapstream folder lets you change how far players see the map, which objects are networked, and which files to switch off. Most servers can keep the defaults. Details, all settings and a troubleshooting list are in the README:
+
+[url=https://github.com/bzed/dzo-mapstream/blob/main/README.md]README on GitHub (full instructions)[/url]
+
+[h2]Links[/h2]
+
+[list]
+[*] [url=https://github.com/bzed/dzo-mapstream/blob/main/README.md]README: installation, settings, troubleshooting[/url]
+[*] [url=https://github.com/bzed/dzo-mapstream/]Source code, issues and development notes[/url]
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2545327648]Dabs Framework (required)[/url]
+[/list]
+
+[h2]License[/h2]
+
+Copyright (c) 2026 Bernd Zeimetz. Licensed under the Bohemia Interactive DayZ Public Licence (DPL): noncommercial, DayZ only, attribution required. The full text is in the repository.
+
+[i]This mod is not affiliated or authorized by Bohemia Interactive a.s. Bohemia Interactive, ARMA, DAYZ and all associated logos and designs are trademarks or registered trademarks of Bohemia Interactive a.s.[/i]
