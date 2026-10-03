@@ -1,4 +1,4 @@
-# dzo-mapstream: design
+# dzo_mapstream: design
 
 Loads DayZ Editor map files (`.dze`) on the server and transfers them to the clients
 as plain data instead of thousands of networked objects. The server and every

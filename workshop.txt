@@ -1,4 +1,4 @@
-[h1]dzo-mapstream[/h1]
+[h1]dzo_mapstream[/h1]
 
 Put big maps made with the DayZ Editor (bases, events, bunkers, shooting ranges, ...) into your server [b]without the usual lag and network load[/b].
 
@@ -25,7 +25,7 @@ This mod does it differently for most objects:
 [olist]
 [*] Get this mod and the required [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2545327648]Dabs Framework[/url] from the Steam Workshop and put both into your server directory. Your hosting provider's mod manager may do this for you.
 [*] Start the server with both mods in the [b]-mod=[/b] parameter, Dabs Framework first, and with a profiles folder:
-[code]-mod=@DabsFramework;@dzo-mapstream -profiles=profiles[/code]
+[code]-mod=@DabsFramework;@dzo_mapstream -profiles=profiles[/code]
 Use [b]-mod=[/b], not -servermod=. Players do not have to do anything: the launcher downloads the mod for them automatically.
 [*] If your server checks signatures, copy the .bikey files from the keys folders of both mods into the keys folder of your server.
 [*] Start the server once. It creates the folder [b]dzo/mapstream[/b] inside your profiles folder, with a settings file and an empty folder called [b]DZE[/b].

@@ -1,4 +1,4 @@
-# dzo-mapstream
+# dzo_mapstream
 
 A DayZ server mod that puts big Editor-made maps (bases, events, bunkers, shooting ranges, ...) into
 your server **without the usual lag and network load**.
@@ -38,7 +38,7 @@ This mod does it differently for most objects:
 2. Start the server with both mods in the `-mod=` parameter, for example:
 
    ```
-   -mod=@DabsFramework;@dzo-mapstream -profiles=profiles
+   -mod=@DabsFramework;@dzo_mapstream -profiles=profiles
    ```
 
    Use the names of the mod folders you have, and keep Dabs Framework first. Use `-mod=`, not
