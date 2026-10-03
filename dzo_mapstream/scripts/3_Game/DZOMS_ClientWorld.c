@@ -52,6 +52,7 @@ class DZOMS_ClientWorld
 	static const float UNLOAD_HYSTERESIS = 200;
 	static const int SPAWNS_PER_FRAME = 100;
 	static const int DELETES_PER_FRAME = 200;
+	static const int STATUS_INTERVAL_MS = 30000;
 	static const int PROXY_INTERVAL_MS = 1000;
 	static const int PROXIES_PER_FRAME = 50;
 	static const float PROXY_HYSTERESIS = 50;
@@ -82,6 +83,7 @@ class DZOMS_ClientWorld
 	protected bool m_Paused;
 	protected int m_PausedUntil;
 
+	protected int m_LastStatus;
 	protected bool m_HaveDistances;
 	protected int m_LastDistances;
 	protected ref map<string, bool> m_FailedTypes = new map<string, bool>();
@@ -215,6 +217,46 @@ class DZOMS_ClientWorld
 		SpawnStep();
 		UnloadStep();
 		ProxyStep(nowMs);
+		LogStatus(nowMs);
+	}
+
+	// every 30 s: where the camera is and what is loaded, to tell "nothing in range" from "spawned but invisible"
+	protected void LogStatus(int nowMs)
+	{
+		if (m_LastStatus != 0 && (nowMs - m_LastStatus) < STATUS_INTERVAL_MS)
+		{
+			return;
+		}
+		m_LastStatus = nowMs;
+		int loaded = 0;
+		int objects = 0;
+		int received = 0;
+		float nearest = -1;
+		for (int i = 0; i < m_Batches.Count(); i++)
+		{
+			DZOMS_ClientBatch cb = m_Batches.Get(i);
+			if (cb.state == DZOMS_ClientBatch.NOT_RECEIVED)
+			{
+				continue;
+			}
+			received++;
+			if (nearest < 0 || cb.distance < nearest)
+			{
+				nearest = cb.distance;
+			}
+			if (cb.state == DZOMS_ClientBatch.LOADED)
+			{
+				loaded++;
+			}
+			for (int j = 0; j < cb.objects.Count(); j++)
+			{
+				if (cb.objects.Get(j))
+				{
+					objects++;
+				}
+			}
+		}
+		DZOMS_Log.Info("status: camera " + m_Camera.ToString() + ", " + received.ToString() + "/" + m_Batches.Count().ToString() + " batches received, nearest " + Math.Round(nearest).ToString() + " m away (view distance " + Math.Round(m_Manifest.viewDistance).ToString() + " m), " + loaded.ToString() + " loaded, " + objects.ToString() + " local objects alive");
 	}
 
 	bool IsFailedType(string type)
@@ -348,6 +390,10 @@ class DZOMS_ClientWorld
 			}
 			DZOMS_ClientBatch cb = m_Batches.Get(pick);
 			int count = cb.data.Count();
+			if (cb.cursor == 0)
+			{
+				DZOMS_Log.Info("batch " + pick.ToString() + ": spawning " + count.ToString() + " objects, " + Math.Round(cb.distance).ToString() + " m away");
+			}
 			while (cb.cursor < count && budget > 0)
 			{
 				int i = cb.cursor;
@@ -375,6 +421,15 @@ class DZOMS_ClientWorld
 			if (cb.cursor >= count)
 			{
 				cb.state = DZOMS_ClientBatch.LOADED;
+				int alive = 0;
+				for (int k = 0; k < count; k++)
+				{
+					if (cb.objects.Get(k))
+					{
+						alive++;
+					}
+				}
+				DZOMS_Log.Info("batch " + pick.ToString() + ": loaded, " + alive.ToString() + " local objects spawned of " + count.ToString());
 			}
 		}
 	}
