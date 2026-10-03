@@ -134,3 +134,10 @@ $P -C pack publish-hint                  # prints the `workshop create/update` c
 Server owners copy `pack/keys/dzo_mapstream.bikey` into their `keys/` folder.
 `DZOMS_SERVER=exp` runs the tests on the 1.30 experimental server; the Dabs Framework build from the
 workshop does not compile on 1.30 (a missing `;` in `Types.c`), so the runner patches a private copy.
+
+## License
+
+Copyright (c) 2026 Bernd Zeimetz <bernd@bzed.de>
+
+Licensed under the Bohemia Interactive DayZ Public Licence (DPL): noncommercial, DayZ only,
+attribution required. See `LICENSE` (source: https://www.bohemia.net/en/licenses/dayz-public-license-dpl).
