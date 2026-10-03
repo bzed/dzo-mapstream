@@ -257,9 +257,9 @@ All server work happens in `MissionServer.OnInit()`, after `super.OnInit()`.
    skipped; an entry without a file in `DZE/` is an error. Per found file: `FileExist`, then
    `EditorSaveData.LoadFromFile()`. A `NULL` result is logged and the file skipped.
 3. Objects: skip entries that are `NULL`, have an empty `Type`, or have
-   `EDITOR_ONLY` set in `Flags`. (`EditorObjectData.EditorOnly` is
-   `[NonSerialized()]` and therefore always false after loading; only `Flags` is
-   reliable.)
+   the `EditorObjectData.EditorOnly` property set. The `EDITOR_ONLY` bit in `Flags`
+   is ignored: real files exist whose objects all carry it (flags 158) and are meant to be
+   seen (`[NonSerialized()]` does not matter for the binary reader, which reads the property).
 4. Skip exact duplicates: same type and same position rounded to 1 cm, using a
    `map<string, bool>` keyed by `type|x|y|z`. O(n), no pairwise comparison.
 5. Hidden world objects (`EditorHiddenObjects`): `FindObject()` (Dabs Framework,
@@ -557,7 +557,7 @@ per-batch SHA-256. `disableCache` covers maps that must not be cached at all.
 
 - `JsonFileLoader<T>.LoadFile()` zero-initializes missing fields (section 5.2).
 - `FileSerializer` does not restore class instances stored in maps; use flat arrays.
-- `EditorObjectData.EditorOnly` is never set after loading a `.dze`; use `Flags`.
+- `EditorObjectData.EditorOnly` is read from the binary `.dze` (version >= 3); the `EDITOR_ONLY` bit in `Flags` is not the same thing and some files set it on every object.
 - `Building.GetLaddersCount()` returns 0 for towers; use the `ladder<n>` selection.
 - Model proxies cannot be listed from script; `IEntity.GetChildren()` is empty for
   map buildings.

@@ -9,6 +9,8 @@ class DZOMS_TestFixtures
 		d.Orientation = ori;
 		d.Scale = scale;
 		d.Flags = flags;
+		// as the Editor stores it: the property is separate from the flag bit
+		d.EditorOnly = (flags & EditorObjectFlags.EDITOR_ONLY) == EditorObjectFlags.EDITOR_ONLY && flags != 158;
 		data.EditorObjects.Insert(d);
 	}
 

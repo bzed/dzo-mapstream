@@ -69,6 +69,8 @@ class DZOMS_Test_ServerWorld
 		DZOMS_TestFixtures.AddObject(w1, model, base + "120 0 0", "0 0 0", 1, 0);
 		DZOMS_TestFixtures.AddObject(w1, "DZOMS_No_Such_Class", base + "140 0 0", "0 0 0", 1, 0);
 		DZOMS_TestFixtures.AddObject(w1, "Apple", base + "160 0 0", "0 0 0", 1, EditorObjectFlags.EDITOR_ONLY);
+		// flag bit without the property (flags 158 as in real files): shown
+		DZOMS_TestFixtures.AddObject(w1, "Apple", base + "170 0 0", "0 0 0", 1, 158);
 		DZOMS_TestFixtures.AddObject(w1, "", base + "180 0 0", "0 0 0", 1, 0);
 		DZOMS_TestFixtures.AddHidden(w1, building);
 		DZOMS_T.Check(DZOMS_TestFixtures.Save(w1, mapsDir + "/w1.dze"), "w1 saved");
@@ -84,22 +86,22 @@ class DZOMS_Test_ServerWorld
 
 		array<ref DZOMS_ObjectEntry> objs = world.GetObjects();
 		array<Object> spawned = world.GetSpawned();
-		DZOMS_T.EqInt(objs.Count(), 9, "9 objects");
-		DZOMS_T.EqInt(spawned.Count(), 9, "9 spawn slots");
+		DZOMS_T.EqInt(objs.Count(), 10, "10 objects");
+		DZOMS_T.EqInt(spawned.Count(), 10, "10 spawn slots");
 		DZOMS_T.EqInt(world.GetRejectedFiles(), 4, "4 rejected map entries");
-		if (objs.Count() == 9)
+		if (objs.Count() == 10)
 		{
-			// order: house, pump, flag, apple, container, house(scale 0), model, missing class, w2 container
-			bool wantNet[9] = {true, true, true, false, true, true, false, false, false};
-			string names[9] = {"house", "pump", "flag", "apple", "w1 container", "scale-0 house", "p3d object", "missing class", "w2 container"};
-			for (int i = 0; i < 9; i++)
+			// order: house, pump, flag, apple, container, house(scale 0), model, missing class, flag-bit apple, w2 container
+			array<bool> wantNet = {true, true, true, false, true, true, false, false, false, false};
+			array<string> names = {"house", "pump", "flag", "apple", "w1 container", "scale-0 house", "p3d object", "missing class", "flag-bit apple", "w2 container"};
+			for (int i = 0; i < 10; i++)
 			{
 				bool isNet = (objs.Get(i).flags & DZOMS_Batch.FLAG_NETWORKED) == DZOMS_Batch.FLAG_NETWORKED;
-				DZOMS_T.Check(isNet == wantNet[i], names[i] + ": networked == " + wantNet[i].ToString());
-				NetworkIdOk(spawned.Get(i), wantNet[i], names[i]);
+				DZOMS_T.Check(isNet == wantNet.Get(i), names.Get(i) + ": networked == " + wantNet.Get(i).ToString());
+				NetworkIdOk(spawned.Get(i), wantNet.Get(i), names.Get(i));
 				if (i != 7)
 				{
-					DZOMS_T.Check(spawned.Get(i) != null, names[i] + ": spawned");
+					DZOMS_T.Check(spawned.Get(i) != null, names.Get(i) + ": spawned");
 				}
 			}
 			DZOMS_T.Check(spawned.Get(7) == null, "missing class: spawn is NULL");
@@ -136,7 +138,7 @@ class DZOMS_Test_ServerWorld
 			string announced = m.hashes.Get(b);
 			DZOMS_T.Eq(announced, recomputed, "hash of batch " + b.ToString());
 		}
-		DZOMS_T.EqInt(total, 9, "all objects in batches");
+		DZOMS_T.EqInt(total, 10, "all objects in batches");
 		string digest = world.GetDigest();
 		DZOMS_T.EqInt(digest.Length(), 64, "digest");
 

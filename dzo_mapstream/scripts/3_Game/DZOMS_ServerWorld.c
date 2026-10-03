@@ -370,8 +370,9 @@ class DZOMS_ServerWorld
 				report.invalid++;
 				continue;
 			}
-			// EditorOnly is [NonSerialized] and always false after loading: only Flags is reliable
-			if ((src.Flags & EditorObjectFlags.EDITOR_ONLY) == EditorObjectFlags.EDITOR_ONLY)
+			// the "Editor Only" property of the object (stored in the file). The EDITOR_ONLY bit of Flags
+			// is not used: files from the Editor exist whose objects all carry it (flags 158) and are meant to be seen
+			if (src.EditorOnly)
 			{
 				report.editorOnly++;
 				continue;
