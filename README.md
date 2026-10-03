@@ -100,9 +100,12 @@ tools/run-server-tests.sh            # boot unit noconfig broken fixtures determ
 tools/run-server-tests.sh unit       # one scenario
 ```
 
-### In-game test list (manual, not yet done)
+### In-game test list (manual)
 
-The client side cannot be tested headless. Before relying on it:
+The client side cannot be tested headless. Confirmed in a real game (1.29 client, signed Workshop
+build): objects appear within `viewDistance`, first join downloads and writes the cache, a second
+join takes every batch from the cache, and zombies path around the spawned buildings. Still open
+are the points below that are not listed here as confirmed. Before relying on the rest:
 
 1. First join downloads closest-first (order of batch requests in the client log), the area around
    the player is complete first; the cache file appears under `$profile:dzo/mapstream/cache/`.
