@@ -1,6 +1,7 @@
 #!/bin/bash
 # Headless server tests. Usage: tools/run-server-tests.sh [scenario...]   (default: all scenarios)
 # Env: DZOMS_SERVER (stable|exp, default stable: 1.29 stable or 1.30 experimental server),
+#      DZOMS_PACKAGE=1 (test pack/build/@dzo_mapstream, the signed armake2 build),
 #      DZOMS_TREE (server tree, default ~/dayz-testserver-dzoms[-exp]), DZOMS_RUNTIME (seconds, default 120)
 SKILL=/home/bzed/.claude/skills/dayz-dev/scripts
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,7 +37,14 @@ if [ "${DZOMS_SERVER:-stable}" = exp ]; then
 else
 	ln -sfn "$WORKSHOP/2545327648" "$TREE/@DabsFramework"
 fi
-ln -sfn "$BUILD/@dzo-mapstream" "$TREE/@dzo-mapstream"
+if [ -n "${DZOMS_PACKAGE:-}" ]; then
+	# test the signed armake2 package (pack/build, see README) instead of the makepbo build
+	[ -d "$ROOT/pack/build/@dzo_mapstream" ] || { echo "no package: run dayz-mod-pack.sh -C pack build"; exit 1; }
+	ln -sfn "$ROOT/pack/build/@dzo_mapstream" "$TREE/@dzo-mapstream"
+	cp "$ROOT/pack/keys/"*.bikey "$TREE/keys/"
+else
+	ln -sfn "$BUILD/@dzo-mapstream" "$TREE/@dzo-mapstream"
+fi
 ln -sfn "$BUILD/@dzo-mapstream-tests" "$TREE/@dzo-mapstream-tests"
 
 # run_server <label> <mods> <ready-regex>; leaves the log at $BUILD/last-<label>.log

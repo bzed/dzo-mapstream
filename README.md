@@ -115,3 +115,19 @@ The client side cannot be tested headless. Before relying on it:
 5. Hidden world objects are hidden.
 6. Once with `batchSize: 1000` and a map with long `.p3d` paths: every batch arrives.
 7. `*Stair*` and `*Switch*` rules: decide whether they stay in the default config.
+
+## Packaging and Workshop upload
+
+`pack/` is a project for the dayz-dev skill's `dayz-mod-pack.sh` (armake2, signing). `pack/src/dzo_mapstream`
+links to the addon folder; `pack/secrets/` holds the private key and is git-ignored (back it up).
+
+```sh
+P=~/.claude/skills/dayz-dev/scripts/dayz-mod-pack.sh
+$P -C pack build && $P -C pack check     # pack/build/@dzo_mapstream, the folder to upload
+DZOMS_PACKAGE=1 tools/run-server-tests.sh && DZOMS_PACKAGE=1 DZOMS_SERVER=exp tools/run-server-tests.sh
+$P -C pack publish-hint                  # prints the `workshop create/update` commands
+```
+
+Server owners copy `pack/keys/dzo_mapstream.bikey` into their `keys/` folder.
+`DZOMS_SERVER=exp` runs the tests on the 1.30 experimental server; the Dabs Framework build from the
+workshop does not compile on 1.30 (a missing `;` in `Types.c`), so the runner patches a private copy.
