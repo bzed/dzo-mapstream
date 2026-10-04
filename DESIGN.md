@@ -734,7 +734,7 @@ additions of 13.4):
 | Object in the `.dze` | `"static"` (default) | `"editor"` |
 |---|---|---|
 | class object, a rule makes it networked | networked | networked |
-| class object, otherwise | static, with the class's model (13.5) | networked |
+| class object, otherwise | static, with the class's model (13.6) | networked |
 | class object without a model | networked, logged (`no model`) | networked |
 | model object (`.p3d`) | rules decide; not networked = static | the same |
 
@@ -772,10 +772,64 @@ model's own textures. New rule token:
   arrays to the model's own textures, it selects too much; then compare the
   textures with the base class before counting a class as retextured.
 - The default config gets `@retextured` after `@fixedItems`. Existing
-  `config.json` files are never rewritten (5.6), so with `spawnMode` static and no
-  rule mentioning `@retextured` the server logs one hint once per start.
+  `config.json` files get it through the config migration to version 2 (13.5).
 
-### 13.5 Server: spawning and data
+### 13.5 Config version and migration
+
+`config.json` gets a version, so later releases can add options or change the
+meaning of existing ones and bring old files up to date instead of guessing.
+
+| Field | Type | Meaning | `0` / missing means |
+|---|---|---|---|
+| `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
+
+- `DZOMS_Config.CURRENT_VERSION = 2` with this plan. Version 1 is the layout of
+  section 5 as released; it has no `configVersion` field, which is why `0`
+  means 1 (zero value = default, 5.2).
+- The default config (5.6, missing file) is written with `configVersion` =
+  `CURRENT_VERSION`.
+
+Loading, extending 5.6 (after `LoadFile()` succeeded, before `Normalize()`):
+
+1. `v = configVersion`, `0` -> `1`.
+2. `v == CURRENT_VERSION`: nothing to do.
+3. `v > CURRENT_VERSION` (file of a newer mod version): log an error, use the
+   file as it is (fields this version does not know are ignored by
+   `JsonFileLoader`), never write it.
+4. `v < CURRENT_VERSION`: apply the migration steps `v -> v+1` in order, each one
+   a static function on the loaded, not yet normalized config
+   (`MigrateTo2(DZOMS_Config c)`, ...), then set `configVersion = CURRENT_VERSION`.
+   Then write the file:
+   1. Back up the admin's file: `CopyFile(path, path + ".v<v>.bak")` (an existing
+      backup of that name is deleted first with `DeleteFile`). If the backup fails,
+      log an error and **do not write** the migrated file; the migrated config is
+      used in memory for this start, and the next start tries again.
+   2. `JsonFileLoader<DZOMS_Config>.SaveFile(path, c)`; a failure is logged, the
+      migrated config is still used.
+   3. Log one line per step, e.g.
+      `[dzo-mapstream] config: migrated config.json from version 1 to 2 (added @retextured), backup config.json.v1.bak`.
+5. Normalize as before. The migrated file is written **before** normalizing, so
+   fields that were `0` (= default) stay `0` in the file and keep following future
+   default changes.
+
+This is the one exception to "never overwrite an admin's file" in 5.6, and only
+for a valid file of an older version; broken JSON is still never written.
+Rewriting goes through the config class, so the file loses what the class does not
+know (misspelled keys) and its formatting; the backup keeps the original.
+
+**Migration 1 -> 2:** insert `"@retextured"` at the **start** of the global
+`networked` list, unless some rule in it already contains `@retextured` (any case,
+also `!@retextured`). At the start, every existing admin rule comes later and still
+wins (last match wins, 5.3), so an admin's `!Land_Container_1Bo` keeps that type
+static. Per-map lists are not touched: they come after the global list anyway.
+`spawnMode` is not added: missing means `"static"`, the new default.
+
+Rules for later versions: a new option whose zero value is its default needs no
+migration (missing = default), only the version bump if the file should show it;
+a change of meaning or of a default that old files must not silently get needs a
+migration step. Every step gets a test with a file of the old version.
+
+### 13.6 Server: spawning and data
 
 Decision, extending 6.2 (`SpawnEntry`):
 
@@ -808,14 +862,14 @@ downloads the maps once more; protocol and cache format stay the same.
   around static objects instead of through them.
 - Distant proxies (9.6) only exist for networked objects and stay class objects.
 
-### 13.6 Report
+### 13.7 Report
 
 The per-map line counts `networked` and `static` (instead of `local`), plus
 `no model`. With `debugLog`, networked types list the deciding rule as before, or
 `(editor)` or `(no model)`; static objects converted from classes are not listed one
 by one, only counted.
 
-### 13.7 For map builders (README text, to be written with the implementation)
+### 13.8 For map builders (README text, to be written with the implementation)
 
 The README gets a section "Building maps for this mod" with this content:
 
@@ -839,24 +893,36 @@ The README gets a section "Building maps for this mod" with this content:
 - Climbing, vaulting and walking work on static and networked objects alike.
 
 The README sections "What it does", "Networked rules" and the config table, and
-`workshop.txt`, are updated to say "static" instead of "local".
+`workshop.txt`, are updated to say "static" instead of "local". The config table
+gets `configVersion` ("written by the mod, do not change it"), and the update notes
+say: on the first start of this version the server adds `@retextured` to the
+`networked` list, rewrites `config.json` and keeps the old file as
+`config.json.v1.bak`.
 
-### 13.8 Changes
+### 13.9 Changes
 
 | Where | Change |
 |---|---|
-| `DZOMS_Config`, `DZOMS_MapEntry` | `spawnMode` global and per map, normalized (13.3); `@retextured` in the default `networked` list |
+| `DZOMS_Config`, `DZOMS_MapEntry` | `spawnMode` global and per map, normalized (13.3); `@retextured` in the default `networked` list; `configVersion`, `CURRENT_VERSION = 2`, migration with backup and write-back, `MigrateTo2` (13.5) |
 | `DZOMS_NetworkRules` | `@retextured` / `!@retextured` (13.4); "local" -> "static" in names and messages |
-| `DZOMS_TypeName` | spawnable model path for a class (13.5), next to `ModelPath()` |
-| `DZOMS_ServerWorld` | decision 13.5, entry type = model path for static objects, `ProcessMarkedObjectsForPathgraphUpdate()` after loading, hint for missing `@retextured`; `SpawnOnServer` no longer creates local class objects except the probe |
-| report (`DZOMS_MapReport`) | `static`, `no model`, `(editor)` (13.6) |
+| `DZOMS_TypeName` | spawnable model path for a class (13.6), next to `ModelPath()` |
+| `DZOMS_ServerWorld` | decision 13.6, entry type = model path for static objects, `ProcessMarkedObjectsForPathgraphUpdate()` after loading; `SpawnOnServer` no longer creates local class objects except the probe |
+| report (`DZOMS_MapReport`) | `static`, `no model`, `(editor)` (13.7) |
 | `DZOMS_ClientWorld` | nothing for spawning; the class branch of `SpawnLocal` remains for proxies only |
-| docs | DESIGN sections 3, 5, 6.2, 9.4, 11 rewritten from this section, then this section removed; README (13.7), `workshop.txt` |
+| docs | DESIGN sections 3, 5, 6.2, 9.4, 11 rewritten from this section, then this section removed; README (13.8), `workshop.txt` |
 
-### 13.9 Tests
+### 13.10 Tests
 
 Server, headless:
 
+- Config version: a missing file is written with `configVersion` 2. A version 1
+  file (no `configVersion`) with a custom `networked` list is migrated:
+  `@retextured` first, the other rules unchanged and in order, `configVersion` 2,
+  backup `config.json.v1.bak` identical to the original, `0` fields still `0` in
+  the written file. A version 1 file that already has `!@retextured` only gets the
+  version. A version 2 file is not written (unchanged modification time). A version
+  3 file logs an error, is used as it is and is not written. Broken JSON is not
+  written (as before). A second start after a migration changes nothing.
 - `spawnMode`: missing, `""`, `"static"`, `"STATIC"`, `"editor"`, unknown (config
   error, default); per-map value overrides the global one, `""` inherits.
 - Static mode: a class without rule becomes a batch entry with its model path and
