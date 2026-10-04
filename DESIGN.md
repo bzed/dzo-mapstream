@@ -104,7 +104,8 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
-    "debugLog": false
+    "debugLog": false,
+    "configVersion": 1
 }
 ```
 
@@ -122,6 +123,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `batchSize` | int | max objects per batch (clamped to 50..1000) | 400 |
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
 | `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
+| `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
 
 **Every field is designed so that its zero value is the default.** Verified on 1.29:
 `JsonFileLoader<T>.LoadFile()` does not keep the class's initial values for fields
@@ -239,6 +241,30 @@ config errors.
   very first start.
 - File present but invalid JSON: log the error from `LoadFile()`, leave the file
   untouched, load no maps. Never overwrite an admin's file.
+- File written with `configVersion` = `DZOMS_Config.CURRENT_VERSION` (1 so far). The default
+  file therefore never triggers a migration. Version 1 is the layout without the field, which
+  is why `0` / missing means 1.
+- Version check after `LoadFile()` succeeded, before `Normalize()`:
+  - same version: nothing to do;
+  - newer version (file of a newer mod): log an error, use the file as it is (unknown fields
+    are ignored by `JsonFileLoader`), never write it;
+  - older version: apply the steps `v -> v+1` in order (`DZOMS_ConfigMigration.Step`), each one on
+    the loaded, not yet normalized config. A missing step is logged as an error; the config is
+    used at the version reached and the file is not written. After all steps: back up the
+    admin's file with `CopyFile(path, path + ".v<v>.bak")` (an existing backup of that name is
+    deleted first). If the backup fails, log an error and **do not write**; the migrated config
+    is used in memory and the next start tries again. Then write the migrated file with
+    `JsonFileLoader.SaveFile` (a failure is logged, the migrated config is still used) and log
+    one line per migration. The file is written **before** normalizing, so fields that were `0`
+    (= default) stay `0` in the file and keep following future default changes.
+  This is the one exception to "never overwrite an admin's file", and only for a valid file of
+  an older version. Rewriting goes through the config class: the file loses what the class does
+  not know (misspelled keys) and its formatting; the backup keeps the original.
+- Rules for later versions: a new option whose zero value is its default needs no migration
+  (missing = default). A change of meaning or of a default that old files must not silently get
+  needs a step. Every step gets a test with a file of the old version. `CopyFile` with
+  `$profile:` paths is covered by the unit tests; the target is deleted first so the mod does not
+  depend on how `CopyFile` treats an existing file.
 
 ## 6. Server
 
@@ -776,46 +802,9 @@ model's own textures. New rule token:
 
 ### 13.5 Config version and migration
 
-`config.json` gets a version, so later releases can add options or change the
-meaning of existing ones and bring old files up to date instead of guessing.
-
-| Field | Type | Meaning | `0` / missing means |
-|---|---|---|---|
-| `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
-
-- `DZOMS_Config.CURRENT_VERSION = 2` with this plan. Version 1 is the layout of
-  section 5 as released; it has no `configVersion` field, which is why `0`
-  means 1 (zero value = default, 5.2).
-- The default config (5.6, missing file) is written with `configVersion` =
-  `CURRENT_VERSION`.
-
-Loading, extending 5.6 (after `LoadFile()` succeeded, before `Normalize()`):
-
-1. `v = configVersion`, `0` -> `1`.
-2. `v == CURRENT_VERSION`: nothing to do.
-3. `v > CURRENT_VERSION` (file of a newer mod version): log an error, use the
-   file as it is (fields this version does not know are ignored by
-   `JsonFileLoader`), never write it.
-4. `v < CURRENT_VERSION`: apply the migration steps `v -> v+1` in order, each one
-   a static function on the loaded, not yet normalized config
-   (`MigrateTo2(DZOMS_Config c)`, ...), then set `configVersion = CURRENT_VERSION`.
-   Then write the file:
-   1. Back up the admin's file: `CopyFile(path, path + ".v<v>.bak")` (an existing
-      backup of that name is deleted first with `DeleteFile`). If the backup fails,
-      log an error and **do not write** the migrated file; the migrated config is
-      used in memory for this start, and the next start tries again.
-   2. `JsonFileLoader<DZOMS_Config>.SaveFile(path, c)`; a failure is logged, the
-      migrated config is still used.
-   3. Log one line per step, e.g.
-      `[dzo-mapstream] config: migrated config.json from version 1 to 2 (added @retextured), backup config.json.v1.bak`.
-5. Normalize as before. The migrated file is written **before** normalizing, so
-   fields that were `0` (= default) stay `0` in the file and keep following future
-   default changes.
-
-This is the one exception to "never overwrite an admin's file" in 5.6, and only
-for a valid file of an older version; broken JSON is still never written.
-Rewriting goes through the config class, so the file loses what the class does not
-know (misspelled keys) and its formatting; the backup keeps the original.
+The versioning itself (field `configVersion`, loading, backup, write-back) is in 5.2 and 5.6 and
+ships first, with `CURRENT_VERSION = 1`. This release raises it to 2 and adds the first step.
+`MigrateTo2` is `DZOMS_ConfigMigration.Step(c, 2, what)`.
 
 **Migration 1 -> 2:** insert `"@retextured"` at the **start** of the global
 `networked` list, unless some rule in it already contains `@retextured` (any case,
