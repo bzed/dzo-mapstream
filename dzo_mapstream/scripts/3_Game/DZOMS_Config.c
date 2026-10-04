@@ -20,6 +20,10 @@ class DZOMS_Config
 	static const int MAX_BATCH_SIZE = 1000;
 	static const float MIN_DISTANCE = 100;
 	static const float MAX_DISTANCE = 20000;
+	// version of the file layout (DESIGN 5.6); a missing value (0) means version 1
+	static const int CURRENT_VERSION = 1;
+
+	int configVersion;
 
 	ref array<ref DZOMS_MapEntry> maps;
 	ref array<string> networked;
@@ -32,9 +36,23 @@ class DZOMS_Config
 	[NonSerialized()]
 	bool m_LoadFailed;
 
+	// the file has a newer version than this mod knows: used as it is, never written
+	[NonSerialized()]
+	bool m_NewerVersion;
+
+	static int EffectiveVersion(int fileValue)
+	{
+		if (fileValue == 0)
+		{
+			return 1;
+		}
+		return fileValue;
+	}
+
 	static DZOMS_Config CreateDefault()
 	{
 		DZOMS_Config c = new DZOMS_Config();
+		c.configVersion = CURRENT_VERSION;
 		c.maps = new array<ref DZOMS_MapEntry>();
 		c.networked = {"@doors", "@ladders", "@actions", "@fixedItems", "Land_Underground_Panel*", "*WaterSpring*", "*Switch*", "*Stair*"};
 		return c;
@@ -142,6 +160,11 @@ class DZOMS_Config
 			DZOMS_Log.Err("config error in " + path + ": " + error);
 			c = new DZOMS_Config();
 			c.m_LoadFailed = true;
+		}
+		else if (EffectiveVersion(c.configVersion) > CURRENT_VERSION)
+		{
+			DZOMS_Log.Err("config.json has version " + c.configVersion.ToString() + ", this mod knows up to " + CURRENT_VERSION.ToString() + ": update the mod; the file is used as it is and not changed");
+			c.m_NewerVersion = true;
 		}
 		c.Normalize();
 		return c;

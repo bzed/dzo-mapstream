@@ -108,5 +108,33 @@ class DZOMS_Test_Config
 			DZOMS_T.Check(c.maps.Get(0).networked != null, "null entry has rule array");
 		}
 		DZOMS_T.EqInt(c.batchSize, 1000, "batchSize clamped down");
+
+		// config version (DESIGN 13.5)
+		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(0), 1, "EffectiveVersion 0 is 1");
+		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(1), 1, "EffectiveVersion 1 is 1");
+		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(3), 3, "EffectiveVersion 3 is 3");
+
+		dir = CaseDir("version_default");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.EqInt(c.configVersion, DZOMS_Config.CURRENT_VERSION, "default file has the current version");
+		DZOMS_T.Check(ReadText(dir + "/config.json").Contains("\"configVersion\": 1"), "default file text carries configVersion 1");
+		DZOMS_T.Check(!c.m_NewerVersion, "default file is not newer");
+
+		dir = CaseDir("version_missing");
+		WriteText(dir + "/config.json", "{ \"maps\": [] }");
+		before = ReadText(dir + "/config.json");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(c.configVersion), 1, "file without configVersion is version 1");
+		DZOMS_T.Check(!c.m_NewerVersion, "file without configVersion is not newer");
+		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "file without configVersion unchanged");
+		DZOMS_T.Check(!FileExist(dir + "/config.json.v1.bak"), "no backup for a version 1 file");
+
+		dir = CaseDir("version_newer");
+		WriteText(dir + "/config.json", "{ \"configVersion\": 7, \"batchSize\": 123 }");
+		before = ReadText(dir + "/config.json");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.m_NewerVersion, "newer file sets m_NewerVersion");
+		DZOMS_T.EqInt(c.batchSize, 123, "newer file keeps its other fields");
+		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "newer file unchanged");
 	}
 }
