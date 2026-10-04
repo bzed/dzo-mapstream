@@ -495,6 +495,21 @@ class DZOMS_ServerWorld
 		int pathStart = TickCount(0);
 		g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
 		DZOMS_Log.Info("path graph updated for the map objects in " + (TickCount(pathStart) / 1000).ToString() + " ms");
+		if (m_Config.experimentalPathgraphRegions)
+		{
+			int regions = 0;
+			int regionStart = TickCount(0);
+			for (int r = 0; r < m_Spawned.Count(); r++)
+			{
+				Object affecting = m_Spawned.Get(r);
+				if (affecting && affecting.CanAffectPathgraph())
+				{
+					g_Game.UpdatePathgraphRegionByObject(affecting);
+					regions++;
+				}
+			}
+			DZOMS_Log.Info("path graph regions updated for " + regions.ToString() + " objects in " + (TickCount(regionStart) / 1000).ToString() + " ms");
+		}
 
 		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
 		m_Promoted.Clear();

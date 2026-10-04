@@ -39,6 +39,9 @@ class DZOMS_Config
 	// proximity networking is on unless this is set: objects then stay local and cannot be climbed
 	bool disableProximity;
 	bool experimentalKeepLocalCopy;
+	// after loading, update the path graph region of every map object that can affect it (zombies
+	// walk through the objects otherwise: DESIGN 13.10b)
+	bool experimentalPathgraphRegions;
 	bool experimentalNoPathgraph;
 
 	[NonSerialized()]

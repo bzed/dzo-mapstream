@@ -316,7 +316,7 @@ class DZOMS_ClientWorld
 			return;
 		}
 		s_ModelPlacementLogged.Set(type, logged + 1);
-		DZOMS_Log.Info("model placement: " + type + " created " + off.ToString() + " m from its entry, corrected");
+		DZOMS_Log.Info("placement: " + type + " created " + off.ToString() + " m from its entry, corrected");
 	}
 
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
@@ -340,6 +340,10 @@ class DZOMS_ClientWorld
 		{
 			return null;
 		}
+		// the engine may move a new object (terrain, water); the entry says where it stands
+		// (the Editor's loader does the same)
+		LogModelPlacement(type, obj, pos, ori);
+		obj.SetPosition(pos);
 		obj.SetOrientation(ori);
 		if (scale != 1)
 		{

@@ -156,6 +156,10 @@ class DZOMS_Test_Config
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(!c.experimentalKeepLocalCopy && !c.experimentalNoPathgraph, "experiments are off by default");
 		DZOMS_T.Check(!c.disableProximity, "proximity networking is on by default");
+		DZOMS_T.Check(!c.experimentalPathgraphRegions, "path graph regions are off by default");
+		WriteText(dir + "/config.json", "{ \"experimentalPathgraphRegions\": true }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.experimentalPathgraphRegions, "path graph regions can be switched on");
 		WriteText(dir + "/config.json", "{ \"disableProximity\": true }");
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(c.disableProximity, "proximity networking can be switched off");

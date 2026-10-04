@@ -2,7 +2,7 @@
 class DZOMS_Test_Proximity
 {
 	// a server world with n local apples 10 m apart (class "Apple" is local without rules)
-	static DZOMS_ServerWorld MakeWorld(string name, int n, vector at)
+	static DZOMS_ServerWorld MakeWorld(string name, int n, vector at, bool pathgraphRegions = false)
 	{
 		string mapsDir = DZOMS_T.DIR + "/DZE_" + name;
 		MakeDirectory(DZOMS_T.DIR);
@@ -18,6 +18,7 @@ class DZOMS_Test_Proximity
 		DZOMS_MapEntry e = new DZOMS_MapEntry();
 		e.file = name + ".dze";
 		c.maps.Insert(e);
+		c.experimentalPathgraphRegions = pathgraphRegions;
 		c.Normalize();
 		DZOMS_ServerWorld w = new DZOMS_ServerWorld(c, mapsDir, new DZOMS_ObjectProbe());
 		w.m_Offline = true;
@@ -618,6 +619,14 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
+	static void RunPathgraphRegions()
+	{
+		DZOMS_ServerWorld w = MakeWorld("prox_regions", 3, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -150", true);
+		DZOMS_T.EqInt(w.GetObjectCount(), 3, "loading with path graph regions: 3 objects");
+		DZOMS_T.Check(w.GetSpawned().Get(0) != null, "loading with path graph regions: objects exist");
+		w.Destroy();
+	}
+
 	static void RunDisabled()
 	{
 		DZOMS_ServerWorld w = MakeWorld("prox_off", 2, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -120");
@@ -683,6 +692,7 @@ class DZOMS_Test_Proximity
 		RunClientModelPlacement();
 		RunModelPlacement();
 		RunDisabled();
+		RunPathgraphRegions();
 		RunKeepLocal();
 		RunPromotion();
 		RunProtocol();
