@@ -56,6 +56,20 @@ class DZOMS_ClientWorld
 	static const int PROXY_INTERVAL_MS = 1000;
 	static const int PROXIES_PER_FRAME = 50;
 	static const float PROXY_HYSTERESIS = 50;
+	// networked copies announced by the server (DESIGN 13.5)
+	static const int SWAP_TIMEOUT_MS = 10000;
+	static const int SWAPS_PER_FRAME = 20;
+	static const int RESPAWNS_PER_FRAME = 50;
+	static const int ID_FACTOR = 1024;
+	static const int MAX_ANNOUNCED = 4000;
+
+	int m_MaxAnnounced = MAX_ANNOUNCED;	// tests lower it
+	protected ref map<int, bool> m_NetworkedIds = new map<int, bool>();	// key batch * ID_FACTOR + index
+	protected ref array<int> m_PendingKeys = new array<int>();
+	protected ref array<int> m_PendingSince = new array<int>();
+	protected ref array<int> m_RespawnKeys = new array<int>();
+	protected int m_SwapTimeouts;
+	protected int m_AnnounceDropped;
 
 	// test seam: when set, requests are recorded here instead of being sent
 	bool m_Offline;
@@ -215,6 +229,8 @@ class DZOMS_ClientWorld
 		}
 		UpdateDistances(nowMs);
 		SpawnStep();
+		SwapStep(nowMs);
+		RespawnStep();
 		UnloadStep();
 		ProxyStep(nowMs);
 		LogStatus(nowMs);
@@ -398,7 +414,7 @@ class DZOMS_ClientWorld
 			{
 				int i = cb.cursor;
 				cb.cursor++;
-				if (cb.data.IsNetworked(i) || cb.objects.Get(i))
+				if (cb.data.IsNetworked(i) || cb.objects.Get(i) || m_NetworkedIds.Contains(pick * ID_FACTOR + i))
 				{
 					continue;
 				}
@@ -653,6 +669,217 @@ class DZOMS_ClientWorld
 				return;
 			}
 			HandleBatch(b, g_Game.GetTime());
+		}
+		else if (rpcType == DZOMS_Rpc.OBJECTS_NETWORKED || rpcType == DZOMS_Rpc.OBJECTS_LOCAL)
+		{
+			DZOMS_IdList ids = new DZOMS_IdList();
+			if (!ctx.Read(ids) || !ids)
+			{
+				return;
+			}
+			if (rpcType == DZOMS_Rpc.OBJECTS_NETWORKED)
+			{
+				HandleNetworked(ids, g_Game.GetTime());
+			}
+			else
+			{
+				HandleLocal(ids, g_Game.GetTime());
+			}
+		}
+	}
+
+	int GetNetworkedIdCount()
+	{
+		return m_NetworkedIds.Count();
+	}
+
+	bool IsAnnouncedNetworked(int batch, int index)
+	{
+		return m_NetworkedIds.Contains(batch * ID_FACTOR + index);
+	}
+
+	int GetPendingSwapCount()
+	{
+		return m_PendingKeys.Count();
+	}
+
+	int GetSwapTimeoutCount()
+	{
+		return m_SwapTimeouts;
+	}
+
+	int GetAnnounceDropped()
+	{
+		return m_AnnounceDropped;
+	}
+
+	// valid when the batch exists and the index fits (the real size once the batch is received)
+	protected bool ValidId(int batch, int index)
+	{
+		if (batch < 0 || batch >= m_Batches.Count() || index < 0 || index >= ID_FACTOR)
+		{
+			return false;
+		}
+		DZOMS_ClientBatch cb = m_Batches.Get(batch);
+		if (cb.data && index >= cb.data.Count())
+		{
+			return false;
+		}
+		return true;
+	}
+
+	// these objects now have a networked copy: no local copy any more, as soon as the twin is here
+	void HandleNetworked(DZOMS_IdList ids, int nowMs)
+	{
+		if (!ids || !ids.IsValid())
+		{
+			return;
+		}
+		for (int n = 0; n < ids.Count(); n++)
+		{
+			int batch = ids.batch.Get(n);
+			int index = ids.index.Get(n);
+			if (!ValidId(batch, index))
+			{
+				continue;
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			int key = batch * ID_FACTOR + index;
+			if (cb.data && cb.data.IsNetworked(index))
+			{
+				continue;
+			}
+			if (m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			if (m_NetworkedIds.Count() >= m_MaxAnnounced)
+			{
+				m_AnnounceDropped++;
+				continue;
+			}
+			m_NetworkedIds.Set(key, true);
+			int queued = m_RespawnKeys.Find(key);
+			if (queued >= 0)
+			{
+				m_RespawnKeys.RemoveOrdered(queued);
+			}
+			if (cb.data && cb.objects.Get(index))
+			{
+				m_PendingKeys.Insert(key);
+				m_PendingSince.Insert(nowMs);
+			}
+		}
+	}
+
+	// these objects are local again: spawn the local copy where the batch is spawned
+	void HandleLocal(DZOMS_IdList ids, int nowMs)
+	{
+		if (!ids || !ids.IsValid())
+		{
+			return;
+		}
+		for (int n = 0; n < ids.Count(); n++)
+		{
+			int batch = ids.batch.Get(n);
+			int index = ids.index.Get(n);
+			if (!ValidId(batch, index))
+			{
+				continue;
+			}
+			int key = batch * ID_FACTOR + index;
+			if (!m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			m_NetworkedIds.Remove(key);
+			int pending = m_PendingKeys.Find(key);
+			if (pending >= 0)
+			{
+				m_PendingKeys.RemoveOrdered(pending);
+				m_PendingSince.RemoveOrdered(pending);
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			if (!cb.data || cb.objects.Get(index))
+			{
+				continue;
+			}
+			bool spawned = cb.state == DZOMS_ClientBatch.LOADED || (cb.state == DZOMS_ClientBatch.LOADING && cb.cursor > index);
+			if (spawned)
+			{
+				m_RespawnKeys.Insert(key);
+			}
+		}
+	}
+
+	// pending swaps: delete the local copy once the networked twin exists, give up after SWAP_TIMEOUT_MS
+	protected void SwapStep(int nowMs)
+	{
+		int budget = Math.Min(SWAPS_PER_FRAME, m_PendingKeys.Count());
+		while (budget > 0 && m_PendingKeys.Count() > 0)
+		{
+			budget--;
+			int key = m_PendingKeys.Get(0);
+			int since = m_PendingSince.Get(0);
+			m_PendingKeys.RemoveOrdered(0);
+			m_PendingSince.RemoveOrdered(0);
+			int batch = key / ID_FACTOR;
+			int index = key - batch * ID_FACTOR;
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			Object copy = cb.objects.Get(index);
+			if (!copy)
+			{
+				continue;
+			}
+			if (NetworkedInstancePresent(cb.data.GetType(index), cb.data.positions.Get(index), copy))
+			{
+				g_Game.ObjectDelete(copy);
+				cb.objects.Set(index, null);
+				continue;
+			}
+			if (nowMs - since >= SWAP_TIMEOUT_MS)
+			{
+				m_SwapTimeouts++;
+				continue;
+			}
+			m_PendingKeys.Insert(key);
+			m_PendingSince.Insert(since);
+		}
+	}
+
+	protected void RespawnStep()
+	{
+		int budget = RESPAWNS_PER_FRAME;
+		while (budget > 0 && m_RespawnKeys.Count() > 0)
+		{
+			int key = m_RespawnKeys.Get(0);
+			m_RespawnKeys.RemoveOrdered(0);
+			int batch = key / ID_FACTOR;
+			int index = key - batch * ID_FACTOR;
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			if (!cb.data || cb.objects.Get(index) || m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			if (cb.state != DZOMS_ClientBatch.LOADED && cb.state != DZOMS_ClientBatch.LOADING)
+			{
+				continue;
+			}
+			string type = cb.data.GetType(index);
+			if (m_FailedTypes.Contains(type))
+			{
+				continue;
+			}
+			budget--;
+			Object o = SpawnLocal(type, cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index));
+			if (o)
+			{
+				cb.objects.Set(index, o);
+			}
+			else
+			{
+				MarkFailed(type);
+			}
 		}
 	}
 

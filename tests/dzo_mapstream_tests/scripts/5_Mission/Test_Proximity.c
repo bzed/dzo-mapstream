@@ -145,10 +145,145 @@ class DZOMS_Test_Proximity
 		return l;
 	}
 
+	static DZOMS_IdList One(int b, int i)
+	{
+		DZOMS_IdList l = new DZOMS_IdList();
+		l.Add(b, i);
+		return l;
+	}
+
+	// a loaded client world: batch 0 = 6 apples (0.5 m apart), batch 1 = 3 apples 3 km away
+	static DZOMS_ClientWorld MakeClient(vector base)
+	{
+		array<ref DZOMS_ObjectEntry> list = new array<ref DZOMS_ObjectEntry>();
+		for (int i = 0; i < 6; i++)
+		{
+			list.Insert(new DZOMS_ObjectEntry("Apple", base + Vector(i * 0.5, 0, 0), "0 0 0", 1, 0));
+		}
+		for (int j = 0; j < 3; j++)
+		{
+			list.Insert(new DZOMS_ObjectEntry("Apple", base + Vector(3000 + j * 0.5, 0, 0), "0 0 0", 1, 0));
+		}
+		array<ref DZOMS_Batch> sb = new array<ref DZOMS_Batch>();
+		array<float> bo = new array<float>();
+		DZOMS_BatchBuilder.Build(list, 400, sb, bo);
+		DZOMS_Manifest manifest = DZOMS_Test_ClientDownload.MakeManifest(sb, bo, true);
+		DZOMS_ClientWorld w = new DZOMS_ClientWorld("");
+		w.m_Offline = true;
+		w.Update(base, DZOMS_Test_ClientSpawn.s_Time, true);
+		w.HandleManifest(manifest, DZOMS_Test_ClientSpawn.s_Time);
+		for (int k = 0; k < 2; k++)
+		{
+			DZOMS_Batch c = DZOMS_Test_ClientDownload.Clone(sb.Get(k));
+			c.index = k;
+			w.HandleBatch(c, DZOMS_Test_ClientSpawn.s_Time);
+		}
+		return w;
+	}
+
+	static void RunClientSwap()
+	{
+		DZOMS_Test_ClientSpawn.s_Time = 1000;
+		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -700";
+
+		// announced before the batch spawns: no local copy for that entry
+		DZOMS_ClientWorld w = MakeClient(base);
+		// the batch with 6 entries is the one near the camera
+		int nearIndex = 0;
+		if (w.GetClientBatch(1).data.Count() == 6)
+		{
+			nearIndex = 1;
+		}
+		DZOMS_ClientBatch b0 = w.GetClientBatch(nearIndex);
+		w.HandleNetworked(One(nearIndex, 2), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.Check(w.IsAnnouncedNetworked(nearIndex, 2), "announced id is in the set");
+		DZOMS_T.EqInt(w.GetNetworkedIdCount(), 1, "one id announced");
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.EqInt(DZOMS_Test_ClientSpawn.Live(b0), 5, "announced entry is not spawned locally, the other 5 are");
+		DZOMS_T.Check(b0.objects.Get(2) == null, "slot of the announced entry is empty");
+
+		// announced after the spawn, networked instance present: local copy goes
+		Object twin = g_Game.CreateObjectEx("Apple", base + "1.5 0 0", ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		DZOMS_T.Check(twin != null, "networked twin created");
+		Object copy3 = b0.objects.Get(3);
+		DZOMS_T.Check(copy3 != null, "entry 3 has a local copy");
+		w.HandleNetworked(One(nearIndex, 3), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "one swap pending");
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(b0.objects.Get(3) == null, "local copy deleted once the twin is present");
+		DZOMS_T.EqInt(w.GetPendingSwapCount(), 0, "no swap pending");
+
+		// announced without a networked instance: after the timeout the local copy stays
+		Object copy4 = b0.objects.Get(4);
+		w.HandleNetworked(One(nearIndex, 4), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "no twin: still pending");
+		DZOMS_T.Check(b0.objects.Get(4) == copy4, "no twin: local copy kept");
+		DZOMS_Test_ClientSpawn.Frame(w, base, 10500);
+		DZOMS_T.EqInt(w.GetPendingSwapCount(), 0, "timeout drops the pending swap");
+		DZOMS_T.EqInt(w.GetSwapTimeoutCount(), 1, "timeout counted");
+		DZOMS_T.Check(b0.objects.Get(4) == copy4, "timeout: local copy kept");
+
+		// back to local: the local copy returns
+		w.HandleLocal(One(nearIndex, 3), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.Check(!w.IsAnnouncedNetworked(nearIndex, 3), "id removed from the set");
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(b0.objects.Get(3) != null, "local copy is back");
+		g_Game.ObjectDelete(twin);
+
+		// ids that are invalid or unknown change nothing and do not throw
+		int before = w.GetNetworkedIdCount();
+		w.HandleNetworked(One(99, 0), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(One(nearIndex, 500), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(One(-1, 0), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(One(nearIndex, -3), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleLocal(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleLocal(One(99, 99), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_IdList skewed = new DZOMS_IdList();
+		skewed.batch.Insert(nearIndex);
+		w.HandleNetworked(skewed, DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(null, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.EqInt(w.GetNetworkedIdCount(), before, "invalid ids are ignored");
+		// duplicates: the second announcement changes nothing
+		w.HandleNetworked(One(nearIndex, 2), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.EqInt(w.GetNetworkedIdCount(), before, "duplicate announcement ignored");
+		// the same id in both messages of one tick: the later one wins
+		w.HandleNetworked(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleLocal(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(!w.IsAnnouncedNetworked(nearIndex, 5), "local after networked: not announced");
+		DZOMS_T.Check(b0.objects.Get(5) != null, "local after networked: local copy exists");
+
+		// unload and reload honour the set
+		DZOMS_Test_ClientSpawn.Frame(w, base + "6000 0 0", 300);
+		DZOMS_Test_ClientSpawn.Frame(w, base + "6000 0 0", 16);
+		DZOMS_T.EqInt(DZOMS_Test_ClientSpawn.Live(b0), 0, "far away: everything unloaded");
+		DZOMS_T.Check(w.IsAnnouncedNetworked(nearIndex, 2), "the set survives the unload");
+		DZOMS_Test_ClientSpawn.Frame(w, base, 300);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(b0.objects.Get(2) == null, "reloaded batch skips the announced entry");
+		DZOMS_T.Check(b0.objects.Get(0) != null, "reloaded batch spawns the others");
+		w.Destroy();
+
+		// the cap on the set
+		DZOMS_ClientWorld capped = MakeClient(base + "50 0 0");
+		capped.m_MaxAnnounced = 3;
+		for (int c = 0; c < 6; c++)
+		{
+			capped.HandleNetworked(One(nearIndex, c), DZOMS_Test_ClientSpawn.s_Time);
+		}
+		DZOMS_T.EqInt(capped.GetNetworkedIdCount(), 3, "the set stops at the cap");
+		DZOMS_T.EqInt(capped.GetAnnounceDropped(), 3, "ids over the cap are counted");
+		capped.Destroy();
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("proximity");
 		RunProtocol();
 		RunServerState();
+		RunClientSwap();
 	}
 }
