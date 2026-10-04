@@ -67,6 +67,8 @@ class DZOMS_ClientWorld
 	protected ref map<int, bool> m_NetworkedIds = new map<int, bool>();	// key batch * ID_FACTOR + index
 	protected ref array<int> m_PendingKeys = new array<int>();
 	protected ref array<int> m_PendingSince = new array<int>();
+	protected ref array<int> m_PendingLow = new array<int>();	// network id of the announced twin
+	protected ref array<int> m_PendingHigh = new array<int>();
 	protected ref array<int> m_RespawnKeys = new array<int>();
 	protected int m_SwapTimeouts;
 	protected int m_AnnounceDropped;
@@ -731,7 +733,7 @@ class DZOMS_ClientWorld
 	// these objects now have a networked copy: no local copy any more, as soon as the twin is here
 	void HandleNetworked(DZOMS_IdList ids, int nowMs)
 	{
-		if (!ids || !ids.IsValid())
+		if (!ids || !ids.IsValid() || !ids.HasNetIds())
 		{
 			return;
 		}
@@ -768,6 +770,8 @@ class DZOMS_ClientWorld
 			{
 				m_PendingKeys.Insert(key);
 				m_PendingSince.Insert(nowMs);
+				m_PendingLow.Insert(ids.netLow.Get(n));
+				m_PendingHigh.Insert(ids.netHigh.Get(n));
 			}
 		}
 	}
@@ -798,6 +802,8 @@ class DZOMS_ClientWorld
 			{
 				m_PendingKeys.RemoveOrdered(pending);
 				m_PendingSince.RemoveOrdered(pending);
+				m_PendingLow.RemoveOrdered(pending);
+				m_PendingHigh.RemoveOrdered(pending);
 			}
 			DZOMS_ClientBatch cb = m_Batches.Get(batch);
 			if (!cb.data || cb.objects.Get(index))
@@ -821,8 +827,12 @@ class DZOMS_ClientWorld
 			budget--;
 			int key = m_PendingKeys.Get(0);
 			int since = m_PendingSince.Get(0);
+			int twinLow = m_PendingLow.Get(0);
+			int twinHigh = m_PendingHigh.Get(0);
 			m_PendingKeys.RemoveOrdered(0);
 			m_PendingSince.RemoveOrdered(0);
+			m_PendingLow.RemoveOrdered(0);
+			m_PendingHigh.RemoveOrdered(0);
 			int batch = key / ID_FACTOR;
 			int index = key - batch * ID_FACTOR;
 			DZOMS_ClientBatch cb = m_Batches.Get(batch);
@@ -831,7 +841,7 @@ class DZOMS_ClientWorld
 			{
 				continue;
 			}
-			if (NetworkedInstancePresent(cb.data.GetType(index), cb.data.positions.Get(index), copy))
+			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), copy))
 			{
 				g_Game.ObjectDelete(copy);
 				cb.objects.Set(index, null);
@@ -844,7 +854,26 @@ class DZOMS_ClientWorld
 			}
 			m_PendingKeys.Insert(key);
 			m_PendingSince.Insert(since);
+			m_PendingLow.Insert(twinLow);
+			m_PendingHigh.Insert(twinHigh);
 		}
+	}
+
+	// the announced twin: the object with that network id, of the entry's type, at the entry's position.
+	// Not a search by type and position: a hidden world object at the same place would pass that.
+	protected bool TwinPresent(int low, int high, string type, vector pos, Object copy)
+	{
+		Object twin = g_Game.GetObjectByNetworkId(low, high);
+		if (!twin || twin == copy)
+		{
+			return false;
+		}
+		if (vector.Distance(twin.GetPosition(), pos) > 0.05)
+		{
+			return false;
+		}
+		string want = DZOMS_TypeName.Of(type);
+		return DZOMS_TypeName.Of(twin.GetType()) == want || DZOMS_TypeName.Of(twin.GetShapeName()) == want;
 	}
 
 	protected void RespawnStep()

@@ -14,8 +14,8 @@ class DZOMS_PlayerState
 // in, never read from the engine, so tests can drive it.
 class DZOMS_Proximity
 {
-	static const float NETWORK_RADIUS = 40;
-	static const float HYSTERESIS = 20;
+	static const float NETWORK_RADIUS = 150;
+	static const float HYSTERESIS_RATIO = 0.5;	// of the radius
 	static const float CELL = 32;
 	static const int UPDATE_INTERVAL_MS = 1000;
 	static const int RELEASE_DELAY_MS = 30000;
@@ -229,7 +229,7 @@ class DZOMS_Proximity
 			{
 				m_NeededAt.Set(ni, nowMs);
 			}
-			else if (dmin > NETWORK_RADIUS + HYSTERESIS && nowMs - m_NeededAt.Get(ni) >= RELEASE_DELAY_MS)
+			else if (dmin > NETWORK_RADIUS * (1 + HYSTERESIS_RATIO) && nowMs - m_NeededAt.Get(ni) >= RELEASE_DELAY_MS)
 			{
 				demote.Insert((100000 - Math.Round(dmin)) * (count + 1) + ni);
 			}
@@ -251,7 +251,11 @@ class DZOMS_Proximity
 		while (m_AnnounceIdx.Count() > 0 && m_AnnounceDue.Get(0) <= nowMs)
 		{
 			int ai = m_AnnounceIdx.Get(0);
-			due.Add(m_World.GetObjectBatch(ai), m_World.GetObjectIndexInBatch(ai));
+			int netLow, netHigh;
+			if (m_World.GetNetworkId(ai, netLow, netHigh))
+			{
+				due.AddNet(m_World.GetObjectBatch(ai), m_World.GetObjectIndexInBatch(ai), netLow, netHigh);
+			}
 			m_AnnounceIdx.RemoveOrdered(0);
 			m_AnnounceDue.RemoveOrdered(0);
 		}

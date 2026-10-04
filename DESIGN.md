@@ -790,7 +790,7 @@ with a timer (no work on frames between updates other than the queue, below).
    distance to a zone centre is within that zone's radius: queue `TO_NETWORKED`, ordered by
    distance to the nearest player, nearest first.
 3. For every `NETWORKED` object: if it is within the radius of any zone, refresh its "needed"
-   time. Otherwise, if it is farther than `radius + hysteresis` (20 m) from every zone and has
+   time. Otherwise, if it is farther than `radius * 1.5` (half the radius as hysteresis) from every zone and has
    not been needed for `releaseDelay` (30 s), queue `TO_LOCAL`, farthest first. Step 3 walks
    the list of networked objects only (at most `maxNetworked`), not the map.
 4. Over `maxNetworked` (default 6000): do not queue more promotions, nearest first wins; log a

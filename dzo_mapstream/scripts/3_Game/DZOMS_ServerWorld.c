@@ -138,6 +138,19 @@ class DZOMS_ServerWorld
 	ref array<int> m_BroadcastTypes = new array<int>();
 	ref array<ref DZOMS_IdList> m_BroadcastLists = new array<ref DZOMS_IdList>();
 
+	// network id of the networked copy of a promoted object; false for a local object
+	bool GetNetworkId(int i, out int low, out int high)
+	{
+		low = 0;
+		high = 0;
+		if (!IsPromoted(i) || !m_Spawned.Get(i))
+		{
+			return false;
+		}
+		m_Spawned.Get(i).GetNetworkID(low, high);
+		return low != 0 || high != 0;
+	}
+
 	bool IsPromoted(int i)
 	{
 		if (i < 0 || i >= m_Promoted.Count())
@@ -181,7 +194,14 @@ class DZOMS_ServerWorld
 			int to = Math.Min(from + DZOMS_IdList.MAX_IDS, total);
 			for (int i = from; i < to; i++)
 			{
-				chunk.Add(ids.batch.Get(i), ids.index.Get(i));
+				if (ids.HasNetIds())
+				{
+					chunk.AddNet(ids.batch.Get(i), ids.index.Get(i), ids.netLow.Get(i), ids.netHigh.Get(i));
+				}
+				else
+				{
+					chunk.Add(ids.batch.Get(i), ids.index.Get(i));
+				}
 			}
 			if (m_Offline)
 			{
@@ -214,9 +234,10 @@ class DZOMS_ServerWorld
 		DZOMS_IdList all = new DZOMS_IdList();
 		for (int i = 0; i < m_Promoted.Count(); i++)
 		{
-			if (m_Promoted.Get(i))
+			int low, high;
+			if (GetNetworkId(i, low, high))
 			{
-				all.Add(GetObjectBatch(i), GetObjectIndexInBatch(i));
+				all.AddNet(GetObjectBatch(i), GetObjectIndexInBatch(i), low, high);
 			}
 		}
 		if (all.Count() > 0)

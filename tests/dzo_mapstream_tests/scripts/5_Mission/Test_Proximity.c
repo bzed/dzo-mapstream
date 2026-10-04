@@ -40,6 +40,16 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(ids.batch.Get(0), 2, "id list batch");
 		DZOMS_T.EqInt(ids.index.Get(0), 7, "id list index");
 
+		DZOMS_T.Check(!ids.HasNetIds(), "plain ids carry no network ids");
+		DZOMS_IdList withNet = new DZOMS_IdList();
+		withNet.AddNet(3, 4, 11, 12);
+		DZOMS_T.Check(withNet.IsValid() && withNet.HasNetIds(), "ids with network ids are valid");
+		DZOMS_T.EqInt(withNet.netLow.Get(0), 11, "network id low");
+		DZOMS_T.EqInt(withNet.netHigh.Get(0), 12, "network id high");
+		DZOMS_IdList skewedNet = new DZOMS_IdList();
+		skewedNet.AddNet(1, 1, 1, 1);
+		skewedNet.netHigh.Clear();
+		DZOMS_T.Check(!skewedNet.IsValid(), "network id arrays of unequal length are invalid");
 		DZOMS_IdList skewed = new DZOMS_IdList();
 		skewed.batch.Insert(1);
 		DZOMS_T.Check(!skewed.IsValid(), "unequal lengths are invalid");
@@ -84,7 +94,10 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(w.GetObjectCount(), 4, "4 objects");
 		DZOMS_T.Check(!w.IsPromoted(0), "not promoted at the start");
 		w.MarkPromoted(1, true);
-		w.MarkPromoted(3, true);
+		DZOMS_T.Check(w.Promote(3), "object 3 promoted for real");
+		int nl, nh;
+		DZOMS_T.Check(w.GetNetworkId(3, nl, nh) && (nl != 0 || nh != 0), "promoted object has a network id");
+		DZOMS_T.Check(!w.GetNetworkId(0, nl, nh), "local object has none");
 		DZOMS_T.Check(w.IsPromoted(1) && w.IsPromoted(3) && !w.IsPromoted(0), "promoted flags");
 		DZOMS_T.EqInt(w.GetPromotedCount(), 2, "promoted count");
 		w.MarkPromoted(-1, true);
@@ -105,13 +118,18 @@ class DZOMS_Test_Proximity
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).Count(), 1, "full set: one id");
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).batch.Get(0), w.GetObjectBatch(3), "full set: batch of object 3");
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).index.Get(0), w.GetObjectIndexInBatch(3), "full set: index of object 3");
+			DZOMS_T.Check(w.m_BroadcastLists.Get(0).HasNetIds(), "full set carries network ids");
+			int fl, fh;
+			w.GetNetworkId(3, fl, fh);
+			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).netLow.Get(0), fl, "full set: network id low of object 3");
+			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).netHigh.Get(0), fh, "full set: network id high of object 3");
 		}
 
 		// chunks of at most 500
 		DZOMS_IdList many = new DZOMS_IdList();
 		for (int i = 0; i < 1200; i++)
 		{
-			many.Add(0, i);
+			many.AddNet(0, i, i + 1, i + 2);
 		}
 		w.m_BroadcastTypes.Clear();
 		w.m_BroadcastLists.Clear();
@@ -122,6 +140,8 @@ class DZOMS_Test_Proximity
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(0).Count(), 500, "chunk 1 has 500");
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(1).Count(), 500, "chunk 2 has 500");
 			DZOMS_T.EqInt(w.m_BroadcastLists.Get(2).Count(), 200, "chunk 3 has 200");
+			DZOMS_T.EqInt(w.m_BroadcastLists.Get(1).netLow.Get(0), 501, "chunk 2 keeps its network ids (low)");
+			DZOMS_T.EqInt(w.m_BroadcastLists.Get(2).netHigh.Get(199), 1201, "chunk 3 keeps its network ids (high)");
 			DZOMS_T.EqInt(w.m_BroadcastTypes.Get(2), DZOMS_Rpc.OBJECTS_NETWORKED, "chunks use the networked id");
 		}
 		w.m_BroadcastTypes.Clear();
@@ -149,6 +169,13 @@ class DZOMS_Test_Proximity
 	{
 		DZOMS_IdList l = new DZOMS_IdList();
 		l.Add(b, i);
+		return l;
+	}
+
+	static DZOMS_IdList OneNet(int b, int i, int low, int high)
+	{
+		DZOMS_IdList l = new DZOMS_IdList();
+		l.AddNet(b, i, low, high);
 		return l;
 	}
 
@@ -195,7 +222,7 @@ class DZOMS_Test_Proximity
 			nearIndex = 1;
 		}
 		DZOMS_ClientBatch b0 = w.GetClientBatch(nearIndex);
-		w.HandleNetworked(One(nearIndex, 2), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, 2, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_T.Check(w.IsAnnouncedNetworked(nearIndex, 2), "announced id is in the set");
 		DZOMS_T.EqInt(w.GetNetworkedIdCount(), 1, "one id announced");
 		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
@@ -208,7 +235,20 @@ class DZOMS_Test_Proximity
 		DZOMS_T.Check(twin != null, "networked twin created");
 		Object copy3 = b0.objects.Get(3);
 		DZOMS_T.Check(copy3 != null, "entry 3 has a local copy");
-		w.HandleNetworked(One(nearIndex, 3), DZOMS_Test_ClientSpawn.s_Time);
+		// a decoy: another networked apple at the same place (like a hidden world object), other ids
+		Object decoy = g_Game.CreateObjectEx("Apple", base + "2.5 0 0", ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		Object copy5 = b0.objects.Get(5);
+		w.HandleNetworked(OneNet(nearIndex, 5, 7001, 0), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(b0.objects.Get(5) == copy5, "a decoy at the same place does not delete the local copy");
+		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "decoy: still pending");
+		w.HandleLocal(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
+		g_Game.ObjectDelete(decoy);
+
+		int twinLow, twinHigh;
+		twin.GetNetworkID(twinLow, twinHigh);
+		DZOMS_T.Check(twinLow != 0 || twinHigh != 0, "the twin has a network id");
+		w.HandleNetworked(OneNet(nearIndex, 3, twinLow, twinHigh), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "one swap pending");
 		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
 		DZOMS_T.Check(b0.objects.Get(3) == null, "local copy deleted once the twin is present");
@@ -216,7 +256,7 @@ class DZOMS_Test_Proximity
 
 		// announced without a networked instance: after the timeout the local copy stays
 		Object copy4 = b0.objects.Get(4);
-		w.HandleNetworked(One(nearIndex, 4), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, 4, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
 		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "no twin: still pending");
 		DZOMS_T.Check(b0.objects.Get(4) == copy4, "no twin: local copy kept");
@@ -232,12 +272,17 @@ class DZOMS_Test_Proximity
 		DZOMS_T.Check(b0.objects.Get(3) != null, "local copy is back");
 		g_Game.ObjectDelete(twin);
 
+		// announcements without network ids are ignored
+		int idsBefore = w.GetNetworkedIdCount();
+		w.HandleNetworked(One(nearIndex, 1), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_T.EqInt(w.GetNetworkedIdCount(), idsBefore, "an announcement without network ids is ignored");
+
 		// ids that are invalid or unknown change nothing and do not throw
 		int before = w.GetNetworkedIdCount();
-		w.HandleNetworked(One(99, 0), DZOMS_Test_ClientSpawn.s_Time);
-		w.HandleNetworked(One(nearIndex, 500), DZOMS_Test_ClientSpawn.s_Time);
-		w.HandleNetworked(One(-1, 0), DZOMS_Test_ClientSpawn.s_Time);
-		w.HandleNetworked(One(nearIndex, -3), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(99, 0, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, 500, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(-1, 0, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, -3, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		w.HandleLocal(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
 		w.HandleLocal(One(99, 99), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_IdList skewed = new DZOMS_IdList();
@@ -246,10 +291,10 @@ class DZOMS_Test_Proximity
 		w.HandleNetworked(null, DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_T.EqInt(w.GetNetworkedIdCount(), before, "invalid ids are ignored");
 		// duplicates: the second announcement changes nothing
-		w.HandleNetworked(One(nearIndex, 2), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, 2, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_T.EqInt(w.GetNetworkedIdCount(), before, "duplicate announcement ignored");
 		// the same id in both messages of one tick: the later one wins
-		w.HandleNetworked(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
+		w.HandleNetworked(OneNet(nearIndex, 5, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		w.HandleLocal(One(nearIndex, 5), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
 		DZOMS_T.Check(!w.IsAnnouncedNetworked(nearIndex, 5), "local after networked: not announced");
@@ -272,7 +317,7 @@ class DZOMS_Test_Proximity
 		capped.m_MaxAnnounced = 3;
 		for (int c = 0; c < 6; c++)
 		{
-			capped.HandleNetworked(One(nearIndex, c), DZOMS_Test_ClientSpawn.s_Time);
+			capped.HandleNetworked(OneNet(nearIndex, c, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
 		}
 		DZOMS_T.EqInt(capped.GetNetworkedIdCount(), 3, "the set stops at the cap");
 		DZOMS_T.EqInt(capped.GetAnnounceDropped(), 3, "ids over the cap are counted");
@@ -356,17 +401,18 @@ class DZOMS_Test_Proximity
 	static void RunPromotion()
 	{
 		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -250";
+		float r = DZOMS_Proximity.NETWORK_RADIUS;
 		string mapsDir = DZOMS_T.DIR + "/DZE_prox_promo";
 		MakeDirectory(DZOMS_T.DIR);
 		MakeDirectory(mapsDir);
 		EditorSaveData data = new EditorSaveData();
 		for (int i = 0; i < 10; i++)
 		{
-			DZOMS_TestFixtures.AddObject(data, "Apple", base + Vector(i * 4, 0, 0), "0 0 0", 1, 0);
+			DZOMS_TestFixtures.AddObject(data, "Apple", base + Vector(i * r / 10, 0, 0), "0 0 0", 1, 0);
 		}
-		DZOMS_TestFixtures.AddObject(data, "Apple", base + "0 0 41", "0 0 0", 1, 0);
-		DZOMS_TestFixtures.AddObject(data, "Apple", base + "100 0 0", "0 0 0", 1, 0);
-		DZOMS_TestFixtures.AddObject(data, "Land_House_1W10", base + "0 0 15", "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "Apple", base + Vector(0, 0, r + 1), "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "Apple", base + Vector(r * 2.5, 0, 0), "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "Land_House_1W10", base + Vector(0, 0, r * 0.4), "0 0 0", 1, 0);
 		DZOMS_TestFixtures.AddObject(data, "DZOMS_No_Such_Class", base + "5 0 5", "0 0 0", 1, 0);
 		DZOMS_TestFixtures.Save(data, mapsDir + "/promo.dze");
 		DZOMS_Config c = new DZOMS_Config();
@@ -408,21 +454,44 @@ class DZOMS_Test_Proximity
 		int nets;
 		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "promoted object: one copy at its position");
 		DZOMS_T.EqInt(nets, 1, "promoted object: the copy is networked");
-		DZOMS_T.EqInt(CountAt("Apple", base + "20 0 0", nets), 1, "not yet promoted: one copy");
+		DZOMS_T.EqInt(CountAt("Apple", base + Vector(r * 0.5, 0, 0), nets), 1, "not yet promoted: one copy");
 		DZOMS_T.EqInt(nets, 0, "not yet promoted: still local");
 		prox.ProcessQueue(1001);
 		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "second call promotes the rest");
-		DZOMS_T.Check(!w.IsPromoted(10) && !w.IsPromoted(11), "outside 40 m and far objects stay local");
+		DZOMS_T.Check(!w.IsPromoted(10) && !w.IsPromoted(11), "outside the radius and far objects stay local");
 		DZOMS_T.Check(!w.IsPromoted(12) && w.GetSpawned().Get(12) == houseBefore, "rule networked object untouched");
 		DZOMS_T.Check(!w.IsPromoted(13), "failed object untouched");
 		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 0, "no announcement before the swap delay");
 		prox.ProcessQueue(1600);
 		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 10, "all 10 announced after the swap delay");
+		int idBad = 0;
+		for (int al = 0; al < w.m_BroadcastLists.Count(); al++)
+		{
+			DZOMS_IdList sent = w.m_BroadcastLists.Get(al);
+			if (w.m_BroadcastTypes.Get(al) != DZOMS_Rpc.OBJECTS_NETWORKED)
+			{
+				continue;
+			}
+			if (!sent.HasNetIds())
+			{
+				idBad++;
+				continue;
+			}
+			for (int an = 0; an < sent.Count(); an++)
+			{
+				Object resolved = g_Game.GetObjectByNetworkId(sent.netLow.Get(an), sent.netHigh.Get(an));
+				if (!resolved || resolved.GetType() != "Apple")
+				{
+					idBad++;
+				}
+			}
+		}
+		DZOMS_T.EqInt(idBad, 0, "announced network ids resolve to the networked copies");
 		DZOMS_T.EqInt(prox.GetNetworkedCount(), 10, "counter: 10 networked");
 		DZOMS_T.EqInt(prox.GetPromotions(), 10, "counter: 10 promotions");
 
 		// the interval: an update 500 ms later does nothing, a zone that moved away needs the release delay
-		a.pos = base + "0 0 500";
+		a.pos = base + Vector(0, 0, r * 12);
 		prox.Update(Players(a, null), 1500);
 		prox.ProcessQueue(1600);
 		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "update inside the interval changes nothing");
@@ -456,8 +525,8 @@ class DZOMS_Test_Proximity
 			}
 		}
 		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "promoted again: " + which);
-		a.pos = base + "0 0 500";
-		DZOMS_PlayerState b = Player(2, base + "70 0 0", true);
+		a.pos = base + Vector(0, 0, r * 12);
+		DZOMS_PlayerState b = Player(2, base + Vector(r * 1.75, 0, 0), true);
 		prox.Update(Players(a, b), 34000);
 		prox.ProcessQueue(34000);
 		prox.Update(Players(a, b), 65000);
@@ -476,12 +545,12 @@ class DZOMS_Test_Proximity
 		// 10 near the first player, plus the apple 100 m away that the second player's zone promoted
 		DZOMS_T.EqInt(w.GetPromotedCount(), 11, "promoted a third time");
 		w.GetObjects().Get(3).type = "DZOMS_No_Such_Class";
-		a.pos = base + "0 0 500";
+		a.pos = base + Vector(0, 0, r * 12);
 		prox.Update(Players(a, b), 97000);
 		prox.ProcessQueue(97000);
 		prox.ProcessQueue(97001);
 		DZOMS_T.Check(w.IsPromoted(3), "failed local respawn: still promoted");
-		DZOMS_T.EqInt(CountAt("Apple", base + "12 0 0", nets), 1, "failed local respawn: the networked copy is kept");
+		DZOMS_T.EqInt(CountAt("Apple", base + Vector(r * 0.3, 0, 0), nets), 1, "failed local respawn: the networked copy is kept");
 		DZOMS_T.EqInt(nets, 1, "failed local respawn: and it is networked");
 		DZOMS_T.EqInt(w.GetPromotedCount(), 1, "failed local respawn: the others were released");
 		DZOMS_T.Check(prox.GetFailures() >= 1, "failed local respawn is counted");
