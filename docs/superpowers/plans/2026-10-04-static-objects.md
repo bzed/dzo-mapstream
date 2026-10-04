@@ -1,5 +1,7 @@
 # Config versioning and static objects Implementation Plan
 
+> **Superseded (2026-10-04).** Phase 1 (config versioning) is done and merged. The Phase 2 prototype failed the in-game check: static models do not fix climbing and misplace objects (DESIGN 13.1, 13.9). Phase 3 is void. The replacement is proximity networking (DESIGN 13); its plan is written separately.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Load the `dayz-dev` skill before writing any Enforce Script: it has the no-hallucination rules, the API lookup (`api.json`) and the local server test procedure this plan relies on.
 
 **Goal:** Version `config.json` with step-by-step migration, then replace local class objects by static models (so players can climb map objects), after an in-game check that static models fix climbing.
