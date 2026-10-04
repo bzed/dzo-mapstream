@@ -49,12 +49,19 @@ modded class MissionServer
 		if (proximityWorld && proximityWorld.GetProximity())
 		{
 			int now = g_Game.GetTime();
+			int started = TickCount(0);
 			DZOMS_Proximity proximity = proximityWorld.GetProximity();
 			if (proximity.NeedsUpdate(now))
 			{
 				proximity.Update(DZOMS_PlayerStates.Collect(), now);
 			}
 			proximity.ProcessQueue(now);
+			proximity.AddUsedUs(TickCount(started));
+			string status = proximity.StatusLine(now);
+			if (status != "")
+			{
+				DZOMS_Log.Info(status);
+			}
 		}
 
 		m_DZOMS_SweepTimer += timeslice;

@@ -486,6 +486,12 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(w.GetPromotedCount(), 1, "failed local respawn: the others were released");
 		DZOMS_T.Check(prox.GetFailures() >= 1, "failed local respawn is counted");
 
+		// the status line: short, only when something happened, not twice within 10 s
+		string line = prox.StatusLine(100000);
+		DZOMS_T.Check(line != "" && line.Length() < 200, "status line after activity, short: " + line);
+		DZOMS_T.Eq(prox.StatusLine(100001), "", "no second status line within 10 s");
+		DZOMS_T.Eq(prox.StatusLine(120000), "", "no status line without activity");
+
 		// promotion and demotion do not touch the data
 		DZOMS_T.Eq(w.GetDigest(), digest, "digest unchanged");
 		string hashesAfter = "";

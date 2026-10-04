@@ -42,6 +42,11 @@ class DZOMS_Proximity
 	protected int m_Promotions;
 	protected int m_Demotions;
 	protected int m_Failures;
+	protected int m_UsedUs;
+	protected int m_ReportAt;
+	protected int m_ReportPromotions;
+	protected int m_ReportDemotions;
+	protected int m_ReportFailures;
 
 	void Init(DZOMS_ServerWorld world)
 	{
@@ -80,6 +85,35 @@ class DZOMS_Proximity
 	protected static int CellKeyXZ(int cx, int cz)
 	{
 		return (cx + 2048) * 4096 + (cz + 2048);
+	}
+
+	// microseconds spent in Update and ProcessQueue, measured by the caller
+	void AddUsedUs(int us)
+	{
+		m_UsedUs += us;
+	}
+
+	// one short line every 10 s while anything happened (prototype numbers for DESIGN 13.10), else ""
+	string StatusLine(int nowMs)
+	{
+		if (nowMs - m_ReportAt < 10000)
+		{
+			return "";
+		}
+		int promotions = m_Promotions - m_ReportPromotions;
+		int demotions = m_Demotions - m_ReportDemotions;
+		int failures = m_Failures - m_ReportFailures;
+		int usedMs = m_UsedUs / 1000;
+		m_ReportAt = nowMs;
+		m_ReportPromotions = m_Promotions;
+		m_ReportDemotions = m_Demotions;
+		m_ReportFailures = m_Failures;
+		m_UsedUs = 0;
+		if (promotions == 0 && demotions == 0 && failures == 0 && GetQueueLength() == 0)
+		{
+			return "";
+		}
+		return "proximity: " + m_Networked.Count().ToString() + " networked, queue " + GetQueueLength().ToString() + ", +" + promotions.ToString() + " -" + demotions.ToString() + " failed " + failures.ToString() + " in 10 s, " + usedMs.ToString() + " ms used";
 	}
 
 	bool NeedsUpdate(int nowMs)
