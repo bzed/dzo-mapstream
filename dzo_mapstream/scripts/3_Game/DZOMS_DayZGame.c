@@ -36,7 +36,7 @@ modded class DayZGame
 		{
 			m_DZOMS_ServerWorld.OnRpc(sender, rpc_type, ctx);
 		}
-		else if (m_DZOMS_ClientWorld && (rpc_type == DZOMS_Rpc.MANIFEST || rpc_type == DZOMS_Rpc.BATCH))
+		else if (m_DZOMS_ClientWorld && (rpc_type == DZOMS_Rpc.MANIFEST || rpc_type == DZOMS_Rpc.BATCH || rpc_type == DZOMS_Rpc.OBJECTS_NETWORKED || rpc_type == DZOMS_Rpc.OBJECTS_LOCAL))
 		{
 			m_DZOMS_ClientWorld.OnRpc(rpc_type, ctx);
 		}

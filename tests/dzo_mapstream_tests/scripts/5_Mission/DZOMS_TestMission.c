@@ -16,6 +16,7 @@ class DZOMS_TestSuites
 		DZOMS_Test_Requests.Run();
 		DZOMS_Test_ClientDownload.Run();
 		DZOMS_Test_ClientSpawn.Run();
+		DZOMS_Test_Proximity.Run();
 	}
 }
 
