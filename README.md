@@ -102,7 +102,8 @@ touched and no maps are loaded; the error is in the log. A complete example:
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
-    "debugLog": false
+    "debugLog": false,
+    "configVersion": 1
 }
 ```
 
@@ -119,7 +120,16 @@ A value of `0` (or a missing line) means "use the default".
 | `proxyDistance` | Networked objects only exist for a player when they are fairly close (about 1000 m). Further away, the player sees a plain copy so the map does not have holes. 100 to 20000. | 1000 |
 | `batchSize` | Maximum objects per batch. 50 to 1000. | 400 |
 | `disableCache` | `true` = players do not keep a copy of the map; they download it on every join. | cache on |
+| `configVersion` | Written by the mod. Do not change it. | 1 |
 | `debugLog` | `true` = write extra details to the log (which objects are networked and why, where every batch is). | off |
+
+### Updates of config.json
+
+`config.json` has a version. When a mod update needs a newer layout, the server migrates your file on
+the first start: it copies the old file to `config.json.v1.bak` (the number is the old version), then
+writes the new one and logs what changed. Your rules and settings are kept. If the backup cannot be
+written, the file stays as it is and the server uses the migrated settings until the next start. A file
+from a newer mod version is used as it is and never changed.
 
 ### Networked rules
 

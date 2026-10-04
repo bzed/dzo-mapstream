@@ -20,7 +20,8 @@ Target: DayZ 1.29 and 1.30. Status: design, nothing implemented yet.
 6. No unbounded work per frame, no unbounded memory, no trust in client input.
 
 Not in scope for the first version: other map formats, a download progress UI,
-cache encryption (planned, section 12).
+cache encryption (planned, section 12), static objects instead of local class
+objects (planned, section 13).
 
 ## 2. Dependencies and packaging
 
@@ -103,7 +104,8 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
-    "debugLog": false
+    "debugLog": false,
+    "configVersion": 1
 }
 ```
 
@@ -121,6 +123,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `batchSize` | int | max objects per batch (clamped to 50..1000) | 400 |
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
 | `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
+| `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
 
 **Every field is designed so that its zero value is the default.** Verified on 1.29:
 `JsonFileLoader<T>.LoadFile()` does not keep the class's initial values for fields
@@ -238,6 +241,30 @@ config errors.
   very first start.
 - File present but invalid JSON: log the error from `LoadFile()`, leave the file
   untouched, load no maps. Never overwrite an admin's file.
+- File written with `configVersion` = `DZOMS_Config.CURRENT_VERSION` (1 so far). The default
+  file therefore never triggers a migration. Version 1 is the layout without the field, which
+  is why `0` / missing means 1.
+- Version check after `LoadFile()` succeeded, before `Normalize()`:
+  - same version: nothing to do;
+  - newer version (file of a newer mod): log an error, use the file as it is (unknown fields
+    are ignored by `JsonFileLoader`), never write it;
+  - older version: apply the steps `v -> v+1` in order (`DZOMS_ConfigMigration.Step`), each one on
+    the loaded, not yet normalized config. A missing step is logged as an error; the config is
+    used at the version reached and the file is not written. After all steps: back up the
+    admin's file with `CopyFile(path, path + ".v<v>.bak")` (an existing backup of that name is
+    deleted first). If the backup fails, log an error and **do not write**; the migrated config
+    is used in memory and the next start tries again. Then write the migrated file with
+    `JsonFileLoader.SaveFile` (a failure is logged, the migrated config is still used) and log
+    one line per migration. The file is written **before** normalizing, so fields that were `0`
+    (= default) stay `0` in the file and keep following future default changes.
+  This is the one exception to "never overwrite an admin's file", and only for a valid file of
+  an older version. Rewriting goes through the config class: the file loses what the class does
+  not know (misspelled keys) and its formatting; the backup keeps the original.
+- Rules for later versions: a new option whose zero value is its default needs no migration
+  (missing = default). A change of meaning or of a default that old files must not silently get
+  needs a step. Every step gets a test with a file of the old version. `CopyFile` with
+  `$profile:` paths is covered by the unit tests; the target is deleted first so the mod does not
+  depend on how `CopyFile` treats an existing file.
 
 ## 6. Server
 
@@ -575,7 +602,7 @@ option.
 
 For the 1229-object test maps ChaCha20 adds about 5 ms. Loading still gets faster
 than today: the hash input is stored directly (12.3), so no string is read
-character by character (`ToAscii()`, about 2 us per character, section 13).
+character by character (`ToAscii()`, about 2 us per character, section 14).
 
 ### 12.3 Cache stores the hash words, not the batch
 
@@ -665,7 +692,251 @@ Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
   an invalid one is reported.
 - Existing cache tests (truncated, wrong version, random, missing file) for version 2.
 
-## 13. Enforce Script pitfalls (verified on 1.29)
+## 13. Planned: static objects instead of local class objects
+
+Not implemented yet; a plan ready to implement once the gate test (13.2) passes. It
+replaces the local class objects of sections 3, 6.2 and 9.4: afterwards every object
+is either **networked** (a class object the server creates) or **static** (a model
+the server and every client create with `CreateStaticObjectUsingP3D`). Local class
+objects (`CreateObjectEx` with `ECE_LOCAL`) are no longer used for map objects, only
+for the distant proxies (9.6) and the probe on the server (6.2).
+
+### 13.1 Problem (found in game)
+
+Players cannot climb or vault onto local class objects. Walking, ramps and stairs
+on them work. When the player tries to climb, they jump instead, hang between the
+lower part and the part they want to reach (also within one object, e.g. from the
+hood of a wreck up to its cabin), then fall, sometimes through the lower part.
+Verified with `HMMV_Wreck`: local, it cannot be climbed; made networked by a rule,
+the same object can.
+
+Cause, inferred (the climb test is engine code, `HumanCommandClimb.DoPerformClimbTest`):
+the climb result `SHumanCommandClimbResult` stores the grab and stand points relative
+to parent entities (`m_GrabPointParent`, `m_ClimbStandPointParent`,
+`m_ClimbOverStandPointParent`), and the climb runs on the client and on the server.
+A local class object is two unrelated entities, one per side, without a network id,
+so client and server cannot agree on the parent; the server's correction makes the
+player fall. Walking needs no reference to an object, so it is not affected.
+
+Nobody else uses local class objects for map content. Vanilla `ObjectSpawner`
+(cfggameplay `objectSpawnersArr`, runs on the server only) creates class objects
+networked and `.p3d` objects with `CreateStaticObjectUsingP3D(..., createLocal = true)`;
+Expansion's `ExpansionWorldObjectsModule.SpawnObject` and the Dabs Framework
+`EditorObjectData.CreateObject` create networked objects.
+
+### 13.2 Gate: static objects must climb in multiplayer
+
+The only climbing test with static objects so far ran in the DayZ Editor, i.e.
+offline, without a separate client and server; local class objects climb fine there,
+too. Before implementing anything:
+
+1. In a test map, place the `HMMV_Wreck` model (its `CfgVehicles HMMV_Wreck model`)
+   as a model object, next to a networked `HMMV_Wreck`.
+2. Dedicated server plus one client with this mod: vault and climb onto the model
+   (also hood -> cabin), walk on it, compare with the networked one.
+3. Check that the client sees **one** model, not two. The server spawns `.p3d`
+   objects with `createLocal = true` and every client spawns its own copy; if the
+   server's copy reached the clients through the network, every model would be
+   doubled. (`.p3d` objects already take this path today, so this checks the
+   current code as well.)
+
+If static objects cannot be climbed either, this plan is void; the fallback is to
+network everything that should be climbable, at the cost this mod exists to avoid.
+
+### 13.3 Spawn modes
+
+New config field `spawnMode`, globally and per map file:
+
+| Field | Type | Meaning | `""` / missing means |
+|---|---|---|---|
+| `spawnMode` | string | `"static"` or `"editor"` (case-insensitive) | `"static"` |
+| `maps[].spawnMode` | string | the same for one map file | the global value |
+
+An unknown value is a config error: logged, the field is treated as missing.
+
+What happens to each object (rules = the networked rules of 5.3, with the
+additions of 13.4):
+
+| Object in the `.dze` | `"static"` (default) | `"editor"` |
+|---|---|---|
+| class object, a rule makes it networked | networked | networked |
+| class object, otherwise | static, with the class's model (13.6) | networked |
+| class object without a model | networked, logged (`no model`) | networked |
+| model object (`.p3d`) | rules decide; not networked = static | the same |
+
+- `"static"` is for maps built from class objects, which is how the Editor places
+  everything by default. Only what needs the network (rules) is networked.
+- `"editor"` takes the map builder's choice from the Editor: the Editor can turn an
+  object into a static object (stored as its `.p3d` path in the `.dze`) and back
+  into a class object. Class objects are networked without looking at the rules;
+  the debug report shows `(editor)` as their rule.
+- The meaning of the rules does not change, only the name of the other outcome:
+  a matching `!pattern` now makes an object **static** instead of local. Logs,
+  README and report say "static".
+- A class object that becomes static loses everything its class adds to the model:
+  script behaviour (lights, particles, sounds, actions), damage and ruins, and
+  retextures (13.4). The default rules keep the known cases networked; anything
+  else needs a rule or `"editor"` mode.
+
+### 13.4 Retextured classes: `@retextured`
+
+Many classes share one model and only differ in `hiddenSelectionsTextures` /
+`hiddenSelectionsMaterials` (colour variants of containers, wrecks, signs).
+`CreateStaticObjectUsingP3D` only takes a model, so the static copy would show the
+model's own textures. New rule token:
+
+| Rule | Matches |
+|---|---|
+| `@retextured` | class objects whose `CfgVehicles <type>` has a non-empty `hiddenSelectionsTextures` or `hiddenSelectionsMaterials` array |
+| `!@retextured` | negated form: such objects become static with the model's own textures |
+
+- Decided from the config (`g_Game.ConfigGetTextArray`), no probe object needed.
+  Verify that inherited values are returned (a colour variant usually inherits
+  `hiddenSelections` from its base class and only sets the textures).
+- `.p3d` objects never match.
+- Measure on the test maps how many types it selects. If base classes set these
+  arrays to the model's own textures, it selects too much; then compare the
+  textures with the base class before counting a class as retextured.
+- The default config gets `@retextured` after `@fixedItems`. Existing
+  `config.json` files get it through the config migration to version 2 (13.5).
+
+### 13.5 Config version and migration
+
+The versioning itself (field `configVersion`, loading, backup, write-back) is in 5.2 and 5.6 and
+ships first, with `CURRENT_VERSION = 1`. This release raises it to 2 and adds the first step.
+`MigrateTo2` is `DZOMS_ConfigMigration.Step(c, 2, what)`.
+
+**Migration 1 -> 2:** insert `"@retextured"` at the **start** of the global
+`networked` list, unless some rule in it already contains `@retextured` (any case,
+also `!@retextured`). At the start, every existing admin rule comes later and still
+wins (last match wins, 5.3), so an admin's `!Land_Container_1Bo` keeps that type
+static. Per-map lists are not touched: they come after the global list anyway.
+`spawnMode` is not added: missing means `"static"`, the new default.
+
+Rules for later versions: a new option whose zero value is its default needs no
+migration (missing = default), only the version bump if the file should show it;
+a change of meaning or of a default that old files must not silently get needs a
+migration step. Every step gets a test with a file of the old version.
+
+### 13.6 Server: spawning and data
+
+Decision, extending 6.2 (`SpawnEntry`):
+
+1. `.p3d` types: unchanged.
+2. Class types in `"editor"` mode: networked, no rule evaluation.
+3. Class types in `"static"` mode: rules as today (including the probe spawn for
+   `@doors`, `@ladders`, `@actions`, `@fixedItems`; the probe object is always
+   deleted afterwards). Networked: spawn networked. Otherwise look up the model
+   (`DZOMS_TypeName.ModelPath`, cached per type); empty: spawn networked and count as
+   `no model`; else spawn static with `CreateStaticObjectUsingP3D(model, pos, ori,
+   scale, true)`.
+4. Cache the result per (type name, rule list, spawn mode) as today, including the
+   model path.
+
+The data entry of a static object carries the **model path as its type**, exactly as
+if the `.dze` had contained the model. Clients already spawn `.p3d` types as static
+objects (9.4), so the client's spawn code does not change, and the hash (10.1)
+covers the model. All batch hashes change once with this version, so every client
+downloads the maps once more; protocol and cache format stay the same.
+
+- Model path string: the `model` config value is written like `\DZ\...\x.p3d`; pass it
+  in the same form that `.p3d` entries of `.dze` files have (look at one when
+  implementing; `ModelPath()` lower-cases and turns `\` into `/`, which is for
+  matching, not for spawning). The gate test (13.2) uses the same string.
+- Duplicates (6.1 step 4) and rules use the class name, as now; the conversion
+  happens after both.
+- Pathgraph: class objects used `ECE_UPDATEPATHGRAPH`. Vanilla calls
+  `g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate()` once after its object
+  spawner; do the same once after all maps are loaded. In-game test: zombies walk
+  around static objects instead of through them.
+- Distant proxies (9.6) only exist for networked objects and stay class objects.
+
+### 13.7 Report
+
+The per-map line counts `networked` and `static` (instead of `local`), plus
+`no model`. With `debugLog`, networked types list the deciding rule as before, or
+`(editor)` or `(no model)`; static objects converted from classes are not listed one
+by one, only counted.
+
+### 13.8 For map builders (README text, to be written with the implementation)
+
+The README gets a section "Building maps for this mod" with this content:
+
+- By default every object becomes a **static object**: the plain model, solid and
+  climbable, created by each player's game. Doors, ladders, wells, levers, placed
+  targets and recoloured objects are kept as normal (networked) objects
+  automatically.
+- A static object only has its model. Lights that switch on, fire and smoke,
+  sounds, things that can be destroyed, and actions of the object are gone. If an
+  object needs any of this, make it networked: add its type to `networked` in
+  `config.json` (its class name, or a pattern like `"*Lamp*"`), or use the Editor mode below.
+- Recoloured objects (same model, other texture) stay networked so they keep their
+  colour. If the plain model colour is fine, add `"!@retextured"` (or
+  `"!<type>"` for single types) to save the network load.
+- **Editor mode** (`"spawnMode": "editor"`, for one map in `maps[]` or globally):
+  the map is spawned exactly as built. In the Editor, objects can be switched
+  between "static object" and "config object". Static objects stay static, every
+  config object becomes networked. Use this when you want to decide per object;
+  keep the number of config objects low, every one of them costs network traffic
+  for every player near it.
+- Climbing, vaulting and walking work on static and networked objects alike.
+
+The README sections "What it does", "Networked rules" and the config table, and
+`workshop.txt`, are updated to say "static" instead of "local". The config table
+gets `configVersion` ("written by the mod, do not change it"), and the update notes
+say: on the first start of this version the server adds `@retextured` to the
+`networked` list, rewrites `config.json` and keeps the old file as
+`config.json.v1.bak`.
+
+### 13.9 Changes
+
+| Where | Change |
+|---|---|
+| `DZOMS_Config`, `DZOMS_MapEntry` | `spawnMode` global and per map, normalized (13.3); `@retextured` in the default `networked` list; `configVersion`, `CURRENT_VERSION = 2`, migration with backup and write-back, `MigrateTo2` (13.5) |
+| `DZOMS_NetworkRules` | `@retextured` / `!@retextured` (13.4); "local" -> "static" in names and messages |
+| `DZOMS_TypeName` | spawnable model path for a class (13.6), next to `ModelPath()` |
+| `DZOMS_ServerWorld` | decision 13.6, entry type = model path for static objects, `ProcessMarkedObjectsForPathgraphUpdate()` after loading; `SpawnOnServer` no longer creates local class objects except the probe |
+| report (`DZOMS_MapReport`) | `static`, `no model`, `(editor)` (13.7) |
+| `DZOMS_ClientWorld` | nothing for spawning; the class branch of `SpawnLocal` remains for proxies only |
+| docs | DESIGN sections 3, 5, 6.2, 9.4, 11 rewritten from this section, then this section removed; README (13.8), `workshop.txt` |
+
+### 13.10 Tests
+
+Server, headless:
+
+- Config version: a missing file is written with `configVersion` 2. A version 1
+  file (no `configVersion`) with a custom `networked` list is migrated:
+  `@retextured` first, the other rules unchanged and in order, `configVersion` 2,
+  backup `config.json.v1.bak` identical to the original, `0` fields still `0` in
+  the written file. A version 1 file that already has `!@retextured` only gets the
+  version. A version 2 file is not written (unchanged modification time). A version
+  3 file logs an error, is used as it is and is not written. Broken JSON is not
+  written (as before). A second start after a migration changes nothing.
+- `spawnMode`: missing, `""`, `"static"`, `"STATIC"`, `"editor"`, unknown (config
+  error, default); per-map value overrides the global one, `""` inherits.
+- Static mode: a class without rule becomes a batch entry with its model path and
+  no networked flag; a networked rule keeps it a class with the flag; a class
+  without `model` becomes networked and is counted as `no model`.
+- Editor mode: every class object is networked whatever the rules say; `.p3d`
+  objects still follow the rules.
+- `@retextured`: a colour variant matches (with inherited `hiddenSelections`), its
+  base class without textures does not, `!@retextured` overrides, `.p3d` never
+  matches.
+- The probe object of `@doors` & co. is gone after loading: no object without a
+  network id left at a static entry's position except the static object itself.
+- Hashes are stable over two starts and change when `spawnMode` changes.
+
+Client, in game:
+
+- Climb and vault onto static objects converted from classes (`HMMV_Wreck`, walls,
+  containers), also from one part of an object onto a higher part.
+- Every static object appears once (no network copy on top, 13.2).
+- Recoloured objects keep their colour (networked) and show the model colour with
+  `!@retextured`.
+- Zombies path around static objects.
+- An `"editor"` map: Editor static objects are static, config objects networked.
+
+## 14. Enforce Script pitfalls (verified on 1.29)
 
 - `JsonFileLoader<T>.LoadFile()` zero-initializes missing fields (section 5.2).
 - `FileSerializer` does not restore class instances stored in maps; use flat arrays.
@@ -689,7 +960,7 @@ Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
 - Assigning `new` to a function parameter fails to compile ("not strong ref"):
   create objects in locals or store them in a `ref` container first.
 
-## 14. Classes
+## 15. Classes
 
 | Module | Class | Responsibility |
 |---|---|---|

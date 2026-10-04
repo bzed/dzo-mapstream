@@ -20,6 +20,10 @@ class DZOMS_Config
 	static const int MAX_BATCH_SIZE = 1000;
 	static const float MIN_DISTANCE = 100;
 	static const float MAX_DISTANCE = 20000;
+	// version of the file layout (DESIGN 5.6); a missing value (0) means version 1
+	static const int CURRENT_VERSION = 1;
+
+	int configVersion;
 
 	ref array<ref DZOMS_MapEntry> maps;
 	ref array<string> networked;
@@ -32,9 +36,30 @@ class DZOMS_Config
 	[NonSerialized()]
 	bool m_LoadFailed;
 
+	// the file has a newer version than this mod knows: used as it is, never written
+	[NonSerialized()]
+	bool m_NewerVersion;
+
+	// version the file had before it was migrated (0 = not migrated) and whether the migrated
+	// file was written
+	[NonSerialized()]
+	int m_MigratedFrom;
+	[NonSerialized()]
+	bool m_MigrationWritten;
+
+	static int EffectiveVersion(int fileValue)
+	{
+		if (fileValue == 0)
+		{
+			return 1;
+		}
+		return fileValue;
+	}
+
 	static DZOMS_Config CreateDefault()
 	{
 		DZOMS_Config c = new DZOMS_Config();
+		c.configVersion = CURRENT_VERSION;
 		c.maps = new array<ref DZOMS_MapEntry>();
 		c.networked = {"@doors", "@ladders", "@actions", "@fixedItems", "Land_Underground_Panel*", "*WaterSpring*", "*Switch*", "*Stair*"};
 		return c;
@@ -114,9 +139,70 @@ class DZOMS_Config
 		}
 	}
 
+	protected void Migrate(string path, DZOMS_ConfigMigration migration)
+	{
+		int from = EffectiveVersion(configVersion);
+		int target = migration.CurrentVersion();
+		if (from >= target)
+		{
+			return;
+		}
+
+		int v = from;
+		string what;
+		string steps = "";
+		bool complete = true;
+		while (v < target)
+		{
+			if (!migration.Step(this, v + 1, what))
+			{
+				DZOMS_Log.Err("config: no migration step to version " + (v + 1).ToString() + ", config.json is used at version " + v.ToString() + " and not written");
+				complete = false;
+				break;
+			}
+			v++;
+			if (steps != "")
+			{
+				steps += ", ";
+			}
+			steps += what;
+		}
+		configVersion = v;
+		if (v == from)
+		{
+			return;
+		}
+		m_MigratedFrom = from;
+		if (!complete)
+		{
+			return;
+		}
+
+		string backupPath = path + ".v" + from.ToString() + ".bak";
+		if (!migration.Backup(path, backupPath))
+		{
+			DZOMS_Log.Err("config: cannot back up " + path + " to " + backupPath + ", the migrated config is used for this start and the file is not written");
+			return;
+		}
+		string error;
+		if (!JsonFileLoader<DZOMS_Config>.SaveFile(path, this, error))
+		{
+			DZOMS_Log.Err("config: cannot write migrated " + path + ": " + error);
+			return;
+		}
+		m_MigrationWritten = true;
+		DZOMS_Log.Info("config: migrated config.json from version " + from.ToString() + " to " + v.ToString() + " (" + steps + "), backup " + backupPath);
+	}
+
 	// never NULL. Missing file: write the default, then load it like any other file.
 	// Invalid JSON: log, leave the file untouched, return an empty config with m_LoadFailed.
 	static DZOMS_Config Load(string dir)
+	{
+		return Load(dir, new DZOMS_ConfigMigration());
+	}
+
+	// Older version: migrate step by step, back up the file, write the migrated file (DESIGN 5.6).
+	static DZOMS_Config Load(string dir, DZOMS_ConfigMigration migration)
 	{
 		MakeDirs(dir);
 		MakeDirectory(dir + "/DZE");
@@ -142,6 +228,15 @@ class DZOMS_Config
 			DZOMS_Log.Err("config error in " + path + ": " + error);
 			c = new DZOMS_Config();
 			c.m_LoadFailed = true;
+		}
+		else if (EffectiveVersion(c.configVersion) > CURRENT_VERSION)
+		{
+			DZOMS_Log.Err("config.json has version " + c.configVersion.ToString() + ", this mod knows up to " + CURRENT_VERSION.ToString() + ": update the mod; the file is used as it is and not changed");
+			c.m_NewerVersion = true;
+		}
+		else
+		{
+			c.Migrate(path, migration);
 		}
 		c.Normalize();
 		return c;
