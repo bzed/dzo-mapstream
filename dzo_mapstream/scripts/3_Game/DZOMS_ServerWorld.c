@@ -285,6 +285,13 @@ class DZOMS_ServerWorld
 		{
 			return false;
 		}
+		// a promoted item is decoration: simulated, it would settle on the ground instead of staying
+		// where the map builder put it (found in game: items 0.4 m off after the swap)
+		EntityAI promoted = EntityAI.Cast(fresh);
+		if (promoted)
+		{
+			promoted.DisableSimulation(true);
+		}
 		if (m_Config.experimentalKeepLocalCopy)
 		{
 			m_KeptLocal.Set(i, old);
@@ -394,7 +401,15 @@ class DZOMS_ServerWorld
 	{
 		if (DZOMS_TypeName.IsModel(e.type))
 		{
-			return g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, e.ori, e.scale, !networked);
+			Object model = g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, e.ori, e.scale, !networked);
+			if (model)
+			{
+				// the engine centres the model's bounding box on the position and does not apply the
+				// orientation like SetOrientation does (DESIGN 13.9)
+				model.SetOrientation(e.ori);
+				model.SetPosition(e.pos);
+			}
+			return model;
 		}
 
 		int flags = ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD | ECE_NOPERSISTENCY_CHAR;
@@ -411,6 +426,7 @@ class DZOMS_ServerWorld
 		{
 			return null;
 		}
+		obj.SetPosition(e.pos);
 		obj.SetOrientation(e.ori);
 		if (e.scale != 1)
 		{

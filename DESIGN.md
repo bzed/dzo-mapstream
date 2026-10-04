@@ -967,6 +967,30 @@ Build `da91b22`: every living player on foot, radius 40 m, no config.
   rules network because of doors). To find out: the same wall with the released build, and
   with this build outside of any zone.
 
+### 13.10b Second and third prototype checks, 2026-10-04
+
+- **Swaps work:** 373 swaps, none timed out, no displaced twin in a dense area (client counters).
+- **Zombies still walk through walls** with `experimentalNoPathgraph` (no path graph update after
+  a swap) and with `experimentalKeepLocalCopy` (no object deleted). So neither the update nor the
+  deletion is the cause. A control run with `disableProximity` decides whether the swapping
+  matters at all. Open.
+- **Model objects (`.p3d` entries) and items sit where the entry does not say.** The client logged
+  231 displaced twins, almost all models (plants, rocks, crates, tire piles) and two items
+  (`WaterBottle`, `FireExtinguisher`), 0.4 to 2 m off and rotated. Causes:
+  - `CreateStaticObjectUsingP3D` centres the model's bounding box on the position and does not
+    apply the orientation like `SetOrientation` (13.9). Reproduced on the headless server with the
+    same offsets (1.96 m for the bush of the log): the **server's** models, local or networked,
+    stand off their entry. Fix: `SetOrientation` and `SetPosition` after creation, on the server
+    and on the client, so both sides use the entry.
+  - A promoted item is simulated and settles on the ground (0.4 m up in the log); promoted
+    objects now get `DisableSimulation(true)`.
+  - Class objects get `SetPosition` after creation, as the Editor's loader does.
+  The client logs the first three displacements per model (`model placement:` lines) so the
+  client's own behaviour is visible.
+- Models and the entry position: whether the Editor stores the origin or the bounding-box centre
+  in `Position` for model objects is not known; the fix assumes the origin (the same meaning as for
+  class objects). If a builder sees models shifted against the Editor, this is the place to look.
+
 ### 13.11 Changes
 
 | Where | Change |

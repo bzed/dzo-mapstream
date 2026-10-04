@@ -295,12 +295,45 @@ class DZOMS_ClientWorld
 		}
 	}
 
+	static ref map<string, int> s_ModelPlacementLogged;
+
+	// how far the engine put a model object from its entry (first 3 per model), to see what a client does
+	protected static void LogModelPlacement(string type, Object model, vector pos, vector ori)
+	{
+		if (!s_ModelPlacementLogged)
+		{
+			s_ModelPlacementLogged = new map<string, int>();
+		}
+		float off = vector.Distance(model.GetPosition(), pos);
+		if (off < 0.02)
+		{
+			return;
+		}
+		int logged = 0;
+		s_ModelPlacementLogged.Find(type, logged);
+		if (logged >= 3)
+		{
+			return;
+		}
+		s_ModelPlacementLogged.Set(type, logged + 1);
+		DZOMS_Log.Info("model placement: " + type + " created " + off.ToString() + " m from its entry, corrected");
+	}
+
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
 	static Object SpawnLocal(string type, vector pos, vector ori, float scale)
 	{
 		if (DZOMS_TypeName.IsModel(type))
 		{
-			return g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			Object model = g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			if (model)
+			{
+				// the engine centres the model's bounding box on the position and does not apply the
+				// orientation like SetOrientation does (DESIGN 13.9): put it where the entry says
+				LogModelPlacement(type, model, pos, ori);
+				model.SetOrientation(ori);
+				model.SetPosition(pos);
+			}
+			return model;
 		}
 		Object obj = g_Game.CreateObjectEx(type, pos, ECE_LOCAL | ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME);
 		if (!obj)

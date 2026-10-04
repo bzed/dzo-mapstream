@@ -630,9 +630,58 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
+	// model objects: the engine puts the bounding-box centre at the position and does not apply the
+	// orientation like SetOrientation (DESIGN 13.9); the server must end up where the entry says
+	static void RunModelPlacement()
+	{
+		array<string> models = {"dz\\plants_bliss\\bush\\b_caraganaarborescens_2s_summer.p3d", "dz\\plants_bliss\\clutter\\c_ferntall_summer.p3d", "dz\\structures\\industrial\\containers\\container_1bo.p3d"};
+		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -90";
+		for (int m = 0; m < models.Count(); m++)
+		{
+			for (int v = 0; v < 2; v++)
+			{
+				vector pos = at + Vector(m * 30 + v * 12, 0, 0);
+				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "40 0 0", 1, 0);
+				Object o = DZOMS_ServerWorld.SpawnOnServer(e, v == 1);
+				string what = "model " + m.ToString() + " networked=" + (v == 1).ToString();
+				DZOMS_T.Check(o != null, what + ": created");
+				if (!o)
+				{
+					continue;
+				}
+				DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
+				DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+				g_Game.ObjectDelete(o);
+			}
+		}
+	}
+
+	// the client's local model objects land where the entry says, too
+	static void RunClientModelPlacement()
+	{
+		array<string> models = {"dz\\plants_bliss\\bush\\b_caraganaarborescens_2s_summer.p3d", "dz\\structures\\industrial\\containers\\container_1bo.p3d"};
+		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -60";
+		for (int m = 0; m < models.Count(); m++)
+		{
+			vector pos = at + Vector(m * 30, 0, 0);
+			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "40 0 0", 1);
+			string what = "client model " + m.ToString();
+			DZOMS_T.Check(o != null, what + ": created");
+			if (!o)
+			{
+				continue;
+			}
+			DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
+			DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+			g_Game.ObjectDelete(o);
+		}
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("proximity");
+		RunClientModelPlacement();
+		RunModelPlacement();
 		RunDisabled();
 		RunKeepLocal();
 		RunPromotion();
