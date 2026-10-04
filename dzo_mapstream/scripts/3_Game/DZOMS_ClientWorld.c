@@ -71,6 +71,9 @@ class DZOMS_ClientWorld
 	protected ref array<int> m_PendingHigh = new array<int>();
 	protected ref array<int> m_RespawnKeys = new array<int>();
 	protected int m_SwapTimeouts;
+	protected int m_SwapsDone;
+	protected int m_TwinMismatch;
+	protected ref map<string, int> m_TwinLogged = new map<string, int>();
 	protected int m_AnnounceDropped;
 
 	// test seam: when set, requests are recorded here instead of being sent
@@ -275,6 +278,7 @@ class DZOMS_ClientWorld
 			}
 		}
 		DZOMS_Log.Info("status: camera " + m_Camera.ToString() + ", " + received.ToString() + "/" + m_Batches.Count().ToString() + " batches received, nearest " + Math.Round(nearest).ToString() + " m away (view distance " + Math.Round(m_Manifest.viewDistance).ToString() + " m), " + loaded.ToString() + " loaded, " + objects.ToString() + " local objects alive");
+		DZOMS_Log.Info("swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_TwinMismatch.ToString() + " displaced twins, " + m_NetworkedIds.Count().ToString() + " announced");
 	}
 
 	bool IsFailedType(string type)
@@ -705,6 +709,17 @@ class DZOMS_ClientWorld
 		return m_PendingKeys.Count();
 	}
 
+	int GetSwapsDone()
+	{
+		return m_SwapsDone;
+	}
+
+	// twins that exist but are not where their entry says
+	int GetTwinMismatchCount()
+	{
+		return m_TwinMismatch;
+	}
+
 	int GetSwapTimeoutCount()
 	{
 		return m_SwapTimeouts;
@@ -841,10 +856,11 @@ class DZOMS_ClientWorld
 			{
 				continue;
 			}
-			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), copy))
+			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), copy))
 			{
 				g_Game.ObjectDelete(copy);
 				cb.objects.Set(index, null);
+				m_SwapsDone++;
 				continue;
 			}
 			if (nowMs - since >= SWAP_TIMEOUT_MS)
@@ -861,19 +877,33 @@ class DZOMS_ClientWorld
 
 	// the announced twin: the object with that network id, of the entry's type, at the entry's position.
 	// Not a search by type and position: a hidden world object at the same place would pass that.
-	protected bool TwinPresent(int low, int high, string type, vector pos, Object copy)
+	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, Object copy)
 	{
 		Object twin = g_Game.GetObjectByNetworkId(low, high);
 		if (!twin || twin == copy)
 		{
 			return false;
 		}
-		if (vector.Distance(twin.GetPosition(), pos) > 0.05)
+		string want = DZOMS_TypeName.Of(type);
+		if (DZOMS_TypeName.Of(twin.GetType()) != want && DZOMS_TypeName.Of(twin.GetShapeName()) != want)
 		{
 			return false;
 		}
-		string want = DZOMS_TypeName.Of(type);
-		return DZOMS_TypeName.Of(twin.GetType()) == want || DZOMS_TypeName.Of(twin.GetShapeName()) == want;
+		float off = vector.Distance(twin.GetPosition(), pos);
+		if (off > 0.05)
+		{
+			m_TwinMismatch++;
+			int logged = 0;
+			m_TwinLogged.Find(type, logged);
+			if (logged < 3)
+			{
+				m_TwinLogged.Set(type, logged + 1);
+				DZOMS_Log.Warn("swap: twin of " + type + " is " + off.ToString() + " m from its entry, twin " + twin.GetPosition().ToString());
+				DZOMS_Log.Warn("swap: entry " + pos.ToString() + " ori " + ori.ToString() + ", twin ori " + twin.GetOrientation().ToString());
+			}
+			return false;
+		}
+		return true;
 	}
 
 	protected void RespawnStep()

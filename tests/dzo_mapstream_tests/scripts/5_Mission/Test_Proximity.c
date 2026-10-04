@@ -252,7 +252,20 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(w.GetPendingSwapCount(), 1, "one swap pending");
 		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
 		DZOMS_T.Check(b0.objects.Get(3) == null, "local copy deleted once the twin is present");
+		DZOMS_T.EqInt(w.GetSwapsDone(), 1, "swap counted");
 		DZOMS_T.EqInt(w.GetPendingSwapCount(), 0, "no swap pending");
+
+		// a twin that is not where the entry says (placement problem): no swap, counted and logged
+		Object off = g_Game.CreateObjectEx("Apple", base + "0.5 0 0.3", ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		int offLow, offHigh;
+		off.GetNetworkID(offLow, offHigh);
+		Object copy1 = b0.objects.Get(1);
+		w.HandleNetworked(OneNet(nearIndex, 1, offLow, offHigh), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(w, base, 16);
+		DZOMS_T.Check(b0.objects.Get(1) == copy1, "a twin 0.3 m off does not replace the local copy");
+		DZOMS_T.Check(w.GetTwinMismatchCount() >= 1, "the displaced twin is counted");
+		w.HandleLocal(One(nearIndex, 1), DZOMS_Test_ClientSpawn.s_Time);
+		g_Game.ObjectDelete(off);
 
 		// announced without a networked instance: after the timeout the local copy stays
 		Object copy4 = b0.objects.Get(4);
@@ -572,9 +585,43 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
+	// experimentalKeepLocalCopy: promotion keeps the server's local copy, demotion reuses it
+	static void RunKeepLocal()
+	{
+		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -180";
+		DZOMS_ServerWorld w = MakeWorld("prox_keep", 3, base);
+		w.GetConfig().experimentalKeepLocalCopy = true;
+		w.GetConfig().experimentalNoPathgraph = true;
+		DZOMS_Proximity prox = new DZOMS_Proximity();
+		prox.Init(w);
+		Object localBefore = w.GetSpawned().Get(1);
+		DZOMS_PlayerState a = Player(1, base, true);
+		prox.Update(Players(a, null), 0);
+		prox.ProcessQueue(0);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 3, "keep local: 3 promoted");
+		int nets;
+		DZOMS_T.EqInt(CountAt("Apple", base + "10 0 0", nets), 2, "keep local: both copies exist on the server");
+		DZOMS_T.EqInt(nets, 1, "keep local: one of them is networked");
+		DZOMS_T.Check(w.GetSpawned().Get(1) != localBefore, "keep local: the slot is the networked copy");
+
+		// demotion reuses the kept local copy: no spawn, so it cannot fail
+		w.GetObjects().Get(1).type = "DZOMS_No_Such_Class";
+		a.pos = base + Vector(0, 0, 10000);
+		prox.Update(Players(a, null), 40000);
+		prox.ProcessQueue(40000);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "keep local: all demoted, also the one whose class cannot be spawned");
+		DZOMS_T.Check(w.GetSpawned().Get(1) == localBefore, "keep local: demotion put the original local copy back");
+		DZOMS_T.EqInt(prox.GetFailures(), 0, "keep local: no failures");
+		prox.ProcessQueue(40600);
+		DZOMS_T.EqInt(CountAt("Apple", base + "10 0 0", nets), 1, "keep local: one copy left after the swap delay");
+		DZOMS_T.EqInt(nets, 0, "keep local: and it is local");
+		w.Destroy();
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("proximity");
+		RunKeepLocal();
 		RunPromotion();
 		RunProtocol();
 		RunServerState();

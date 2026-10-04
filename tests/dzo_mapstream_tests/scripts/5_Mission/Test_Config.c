@@ -151,6 +151,14 @@ class DZOMS_Test_Config
 		}
 		DZOMS_T.EqInt(c.batchSize, 1000, "batchSize clamped down");
 
+		// experimental proximity switches (default off, zero values)
+		dir = CaseDir("experiments");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(!c.experimentalKeepLocalCopy && !c.experimentalNoPathgraph, "experiments are off by default");
+		WriteText(dir + "/config.json", "{ \"experimentalKeepLocalCopy\": true, \"experimentalNoPathgraph\": true }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.experimentalKeepLocalCopy && c.experimentalNoPathgraph, "experiments can be switched on");
+
 		// config version (DESIGN 13.5)
 		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(0), 1, "EffectiveVersion 0 is 1");
 		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(1), 1, "EffectiveVersion 1 is 1");

@@ -32,6 +32,12 @@ class DZOMS_Config
 	int batchSize;
 	bool disableCache;
 	bool debugLog;
+	// experiments for the proximity networking problems found in game (DESIGN 13.10a); removed again
+	// once the cause is known. keep: promotion keeps the server's local copy (demotion reuses it).
+	// no pathgraph: the swapped copies are created without ECE_UPDATEPATHGRAPH and the path graph
+	// is not updated after a swap
+	bool experimentalKeepLocalCopy;
+	bool experimentalNoPathgraph;
 
 	[NonSerialized()]
 	bool m_LoadFailed;
