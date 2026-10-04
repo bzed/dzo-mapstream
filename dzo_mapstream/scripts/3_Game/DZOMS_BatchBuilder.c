@@ -30,8 +30,23 @@ class DZOMS_BatchBuilder
 
 	static void Build(array<ref DZOMS_ObjectEntry> objects, int batchSize, array<ref DZOMS_Batch> outBatches, array<float> outBounds)
 	{
+		array<int> objectBatch = new array<int>();
+		array<int> objectIndex = new array<int>();
+		Build(objects, batchSize, outBatches, outBounds, objectBatch, objectIndex);
+	}
+
+	// outObjectBatch / outObjectIndex: per input object, its batch and its position inside that batch
+	static void Build(array<ref DZOMS_ObjectEntry> objects, int batchSize, array<ref DZOMS_Batch> outBatches, array<float> outBounds, array<int> outObjectBatch, array<int> outObjectIndex)
+	{
 		outBatches.Clear();
 		outBounds.Clear();
+		outObjectBatch.Clear();
+		outObjectIndex.Clear();
+		for (int m = 0; m < objects.Count(); m++)
+		{
+			outObjectBatch.Insert(-1);
+			outObjectIndex.Insert(-1);
+		}
 
 		array<int> cellX = new array<int>();
 		array<int> cellY = new array<int>();
@@ -83,7 +98,7 @@ class DZOMS_BatchBuilder
 				current.Insert(seedObjects.Get(s));
 				if (current.Count() == batchSize)
 				{
-					Emit(objects, current, outBatches, outBounds);
+					Emit(objects, current, outBatches, outBounds, outObjectBatch, outObjectIndex);
 					current = new array<int>();
 				}
 			}
@@ -128,12 +143,12 @@ class DZOMS_BatchBuilder
 
 			if (current.Count() > 0)
 			{
-				Emit(objects, current, outBatches, outBounds);
+				Emit(objects, current, outBatches, outBounds, outObjectBatch, outObjectIndex);
 			}
 		}
 	}
 
-	protected static void Emit(array<ref DZOMS_ObjectEntry> objects, array<int> members, array<ref DZOMS_Batch> outBatches, array<float> outBounds)
+	protected static void Emit(array<ref DZOMS_ObjectEntry> objects, array<int> members, array<ref DZOMS_Batch> outBatches, array<float> outBounds, array<int> outObjectBatch, array<int> outObjectIndex)
 	{
 		DZOMS_Batch b = new DZOMS_Batch();
 		b.index = outBatches.Count();
@@ -143,6 +158,8 @@ class DZOMS_BatchBuilder
 		{
 			DZOMS_ObjectEntry e = objects.Get(members.Get(i));
 			b.Add(e.type, e.pos, e.ori, e.scale, e.flags);
+			outObjectBatch.Set(members.Get(i), b.index);
+			outObjectIndex.Set(members.Get(i), i);
 			sum = sum + e.pos;
 		}
 		float inv = 1.0 / n;

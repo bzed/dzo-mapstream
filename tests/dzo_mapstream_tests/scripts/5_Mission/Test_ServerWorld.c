@@ -89,6 +89,28 @@ class DZOMS_Test_ServerWorld
 		DZOMS_T.EqInt(objs.Count(), 10, "10 objects");
 		DZOMS_T.EqInt(spawned.Count(), 10, "10 spawn slots");
 		DZOMS_T.EqInt(world.GetRejectedFiles(), 4, "4 rejected map entries");
+
+		// object -> batch mapping (proximity networking addresses objects by batch and index)
+		DZOMS_T.EqInt(world.GetObjectCount(), objs.Count(), "GetObjectCount");
+		int mapBad = 0;
+		for (int mo = 0; mo < objs.Count(); mo++)
+		{
+			int mb = world.GetObjectBatch(mo);
+			int mi = world.GetObjectIndexInBatch(mo);
+			array<ref DZOMS_Batch> allBatches = world.GetBatches();
+			if (mb < 0 || mb >= allBatches.Count() || mi < 0 || mi >= allBatches.Get(mb).Count())
+			{
+				mapBad++;
+			}
+			else if (allBatches.Get(mb).positions.Get(mi) != objs.Get(mo).pos || allBatches.Get(mb).GetType(mi) != objs.Get(mo).type)
+			{
+				mapBad++;
+			}
+		}
+		DZOMS_T.EqInt(mapBad, 0, "every object resolves to its batch entry");
+		DZOMS_T.EqInt(world.GetObjectBatch(-1), -1, "batch of index -1");
+		DZOMS_T.EqInt(world.GetObjectBatch(objs.Count()), -1, "batch of index == count");
+		DZOMS_T.EqInt(world.GetObjectIndexInBatch(objs.Count() + 5), -1, "index in batch out of range");
 		if (objs.Count() == 10)
 		{
 			// order: house, pump, flag, apple, container, house(scale 0), model, missing class, flag-bit apple, w2 container

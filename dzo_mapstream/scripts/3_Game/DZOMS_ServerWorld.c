@@ -108,6 +108,8 @@ class DZOMS_ServerWorld
 	protected ref map<Object, bool> m_SuppressedSet = new map<Object, bool>();
 	protected ref map<string, bool> m_SeenObjects = new map<string, bool>();
 	protected ref array<ref DZOMS_Batch> m_Batches = new array<ref DZOMS_Batch>();
+	protected ref array<int> m_ObjectBatch = new array<int>();	// per object: its batch
+	protected ref array<int> m_ObjectIndex = new array<int>();	// per object: its position inside that batch
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
 	protected string m_Digest;
 	protected int m_RejectedFiles;
@@ -127,6 +129,30 @@ class DZOMS_ServerWorld
 	DZOMS_Config GetConfig()
 	{
 		return m_Config;
+	}
+
+	int GetObjectCount()
+	{
+		return m_Objects.Count();
+	}
+
+	// batch of object i, -1 for an invalid index
+	int GetObjectBatch(int i)
+	{
+		if (i < 0 || i >= m_ObjectBatch.Count())
+		{
+			return -1;
+		}
+		return m_ObjectBatch.Get(i);
+	}
+
+	int GetObjectIndexInBatch(int i)
+	{
+		if (i < 0 || i >= m_ObjectIndex.Count())
+		{
+			return -1;
+		}
+		return m_ObjectIndex.Get(i);
 	}
 
 	array<ref DZOMS_ObjectEntry> GetObjects()
@@ -245,7 +271,7 @@ class DZOMS_ServerWorld
 
 		SuppressHidden();
 
-		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds);
+		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
 		m_Manifest.viewDistance = m_Config.viewDistance;
 		m_Manifest.proxyDistance = m_Config.proxyDistance;
 		m_Manifest.disableCache = m_Config.disableCache;
