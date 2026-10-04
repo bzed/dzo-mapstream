@@ -490,6 +490,12 @@ class DZOMS_ServerWorld
 
 		SuppressHidden();
 
+		// ECE_UPDATEPATHGRAPH only marks the objects; vanilla's object spawner and the Editor's loader
+		// process the marks once after spawning, otherwise zombies ignore the objects
+		int pathStart = TickCount(0);
+		g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
+		DZOMS_Log.Info("path graph updated for the map objects in " + (TickCount(pathStart) / 1000).ToString() + " ms");
+
 		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
 		m_Promoted.Clear();
 		m_KeptLocal.Clear();
