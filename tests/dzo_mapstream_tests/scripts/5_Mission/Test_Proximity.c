@@ -618,9 +618,22 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
+	static void RunDisabled()
+	{
+		DZOMS_ServerWorld w = MakeWorld("prox_off", 2, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -120");
+		w.GetConfig().disableProximity = true;
+		w.StartProximity();
+		DZOMS_T.Check(w.GetProximity() == null, "disableProximity: no proximity object");
+		w.GetConfig().disableProximity = false;
+		w.StartProximity();
+		DZOMS_T.Check(w.GetProximity() != null, "enabled: proximity object exists");
+		w.Destroy();
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("proximity");
+		RunDisabled();
 		RunKeepLocal();
 		RunPromotion();
 		RunProtocol();

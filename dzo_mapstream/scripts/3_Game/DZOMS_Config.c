@@ -36,6 +36,8 @@ class DZOMS_Config
 	// once the cause is known. keep: promotion keeps the server's local copy (demotion reuses it).
 	// no pathgraph: the swapped copies are created without ECE_UPDATEPATHGRAPH and the path graph
 	// is not updated after a swap
+	// proximity networking is on unless this is set: objects then stay local and cannot be climbed
+	bool disableProximity;
 	bool experimentalKeepLocalCopy;
 	bool experimentalNoPathgraph;
 

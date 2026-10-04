@@ -155,6 +155,10 @@ class DZOMS_Test_Config
 		dir = CaseDir("experiments");
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(!c.experimentalKeepLocalCopy && !c.experimentalNoPathgraph, "experiments are off by default");
+		DZOMS_T.Check(!c.disableProximity, "proximity networking is on by default");
+		WriteText(dir + "/config.json", "{ \"disableProximity\": true }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.disableProximity, "proximity networking can be switched off");
 		WriteText(dir + "/config.json", "{ \"experimentalKeepLocalCopy\": true, \"experimentalNoPathgraph\": true }");
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(c.experimentalKeepLocalCopy && c.experimentalNoPathgraph, "experiments can be switched on");

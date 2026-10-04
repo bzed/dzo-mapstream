@@ -252,6 +252,12 @@ class DZOMS_ServerWorld
 	// after Load(): proximity networking for this world (DESIGN 13)
 	void StartProximity()
 	{
+		m_Proximity = null;
+		if (m_Config.disableProximity)
+		{
+			DZOMS_Log.Info("proximity networking is switched off in config.json");
+			return;
+		}
 		m_Proximity = new DZOMS_Proximity();
 		m_Proximity.Init(this);
 	}
