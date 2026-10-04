@@ -766,8 +766,8 @@ produces **no zone** (needs nothing) or a **zone**: a disc around the player.
   vehicle driver, whichever the API offers; the implementation checks `GetVelocity` and
   `Transport` against `api.json` first). Height above ground is
   `position.y - SurfaceY(x, z)`.
-- Defaults: `networkRadius` 40 m (a player who is close enough to hear sounds of objects),
-  `vehicleRadius` 15 m, `maxFootSpeed` 6 m/s (sprinting is faster), `maxVehicleSpeed` 8 m/s
+- Defaults: `networkRadius` 150 m (40 m flickered in the prototype check, 13.10; the user
+  wants 100 to 200 m on foot), `vehicleRadius` 40 m, `maxFootSpeed` 6 m/s (sprinting is faster), `maxVehicleSpeed` 8 m/s
   (about 29 km/h), `maxHeight` 20 m. All configurable (13.7).
 
 ### 13.4 Server
@@ -793,7 +793,7 @@ with a timer (no work on frames between updates other than the queue, below).
    time. Otherwise, if it is farther than `radius + hysteresis` (20 m) from every zone and has
    not been needed for `releaseDelay` (30 s), queue `TO_LOCAL`, farthest first. Step 3 walks
    the list of networked objects only (at most `maxNetworked`), not the map.
-4. Over `maxNetworked` (default 4000): do not queue more promotions, nearest first wins; log a
+4. Over `maxNetworked` (default 6000): do not queue more promotions, nearest first wins; log a
    warning once per minute.
 
 **Queue (every frame, budgeted).** At most `PROXIMITY_CREATES_PER_FRAME` promotions and
@@ -819,7 +819,7 @@ deterministic (6.3) and their contents never change while the digest is the same
 
 | Id | Direction | Payload |
 |---|---|---|
-| `OBJECTS_NETWORKED` | server -> all clients (broadcast) | arrays `batch[]`, `index[]` |
+| `OBJECTS_NETWORKED` | server -> all clients (broadcast) | arrays `batch[]`, `index[]`, `netLow[]`, `netHigh[]` (the network id of the networked copy) |
 | `OBJECTS_LOCAL` | server -> all clients (broadcast) | arrays `batch[]`, `index[]` |
 
 - A client that asks for the manifest also gets the full current set of networked ids, in
@@ -832,8 +832,10 @@ Client behaviour (`DZOMS_ClientWorld`):
   (the networked copy arrives through the network).
 - **`OBJECTS_NETWORKED`:** add the ids to the set. For ids whose local copy exists, put the
   object on a pending list. Every update, within a budget, a pending object whose networked
-  instance is present (the check of 9.6: same type, non-zero network id, within 5 cm) has its
-  local copy deleted. After 10 s without an instance the object is dropped from the list and
+  instance is present has its local copy deleted. "Present" means: the object with the announced
+  network id (`GetObjectByNetworkId(netLow, netHigh)`) exists and has the same type name and
+  is within 5 cm of the entry's position. The type and position search of 9.6 is **not** used:
+  a hidden world object at the same place (the Editor replaced it) would pass it. After 10 s without an instance the object is dropped from the list and
   keeps its local copy (it only loses climbing), counted in the debug log.
 - **`OBJECTS_LOCAL`:** remove the ids from the set. For ids in a loaded batch without a local
   copy, spawn it again (budgeted like batch spawning). The server deletes its networked copy
@@ -867,12 +869,12 @@ New fields, all with a zero value that means the default (5.2); no config migrat
 
 | Field | Type | Meaning | `0` / missing means |
 |---|---|---|---|
-| `networkRadius` | float, m | zone radius of a player on foot (clamped 5..200) | 40 |
-| `vehicleRadius` | float, m | zone radius of a slow vehicle (clamped 5..200) | 15 |
+| `networkRadius` | float, m | zone radius of a player on foot (clamped 5..500) | 150 |
+| `vehicleRadius` | float, m | zone radius of a slow vehicle (clamped 5..500) | 40 |
 | `maxFootSpeed` | float, m/s | faster on foot: no zone | 6 |
 | `maxVehicleSpeed` | float, m/s | faster in a vehicle: no zone | 8 |
 | `maxHeight` | float, m | higher above the ground: no zone | 20 |
-| `maxNetworked` | int | most objects networked by proximity at one time | 4000 |
+| `maxNetworked` | int | most objects networked by proximity at one time | 6000 |
 | `proximityExclude` | array of rules | types that are never promoted (same pattern rules as 5.3, no `@` tokens); for performance tuning, e.g. non-solid plants | none |
 | `disableProximity` | bool | switch the feature off (objects stay local, climbing on them does not work) | feature on |
 
@@ -941,6 +943,29 @@ The first implementation step is therefore a small prototype that promotes every
 `networkRadius` of every player on foot, with the budgets as constants and the messages of 13.5,
 and logs the numbers of 13.7; the user checks it in game before the rest (zone rules for
 vehicles and aircraft, config fields, tests) is built.
+
+### 13.10a Prototype check, 2026-10-04 (1.29 client, dedicated server, one player)
+
+Build `da91b22`: every living player on foot, radius 40 m, no config.
+
+- **Climbing works** on objects that were local before: the claim of 13.1 holds.
+- **Server cost is small.** From the server log (75 status lines): 211 promotions in the first
+  10 s after the player appeared, at most 466 objects networked at a time, never a queue, no
+  failed promotion, 24 to 180 ms of server time per 10 s window (below 2 percent of one core).
+  At 150 m the area is 14 times larger: expect several thousand objects, to be measured.
+- **40 m is too small:** the swap is too visible (flicker). The default grows to 150 m; objects
+  that swap far away are not seen swapping.
+- **Objects vanished** after the swap, for example `StaticObj_Sidewalk*`. Likely cause (not yet
+  confirmed): the client decides that the networked twin is present by type and position
+  (`NetworkedInstancePresent`); the map files hide original world objects (`hidden` counts in the
+  log, 60 and 23 for two maps) that the Editor replaced at the same positions. A hidden world
+  object has a network id, the same type and the same position, so the client takes it for the
+  twin and deletes its local copy: nothing is left. Fix: the server announces the **network id
+  of the twin** (13.5) and the client looks that id up.
+- **Zombies walk through non-networked walls.** Open. Not yet known whether this is new or was
+  always so for local objects (the release was only checked against buildings, which the default
+  rules network because of doors). To find out: the same wall with the released build, and
+  with this build outside of any zone.
 
 ### 13.11 Changes
 

@@ -48,7 +48,7 @@
 
 ## Phase A: prototype (does promotion work in a connected game?)
 
-Branch `feature/proximity` from `design/proximity-networking`. Phase A is functionally complete enough to be useful but crude: **every living player on foot** gets a zone of 40 m, the budgets are constants, there is no config, no speed or height rule, no cap. It ends with a build for the user's in-game check; **stop there and wait for the verdict**.
+Branch `feature/proximity` from `design/proximity-networking`. Phase A is functionally complete enough to be useful but crude: **every living player on foot** gets a zone of 40 m (the prototype value; Phase B defaults to 150 m), the budgets are constants, there is no config, no speed or height rule, no cap. It ends with a build for the user's in-game check; **stop there and wait for the verdict**.
 
 ### Task 1: object to batch mapping
 
@@ -150,6 +150,24 @@ Behaviour (DESIGN 13.5):
 
 ---
 
+## Prototype check result (2026-10-04, DESIGN 13.10a)
+
+Climbing works. Server cost small (at most 466 objects, under 2 percent of a core, no failures). Three changes follow: the default radius grows to 150 m (vehicle 40 m, `maxNetworked` 6000); the client verifies the twin by network id (Task 5b, because hidden world objects at the same position fooled the type-and-position check and made objects vanish); zombies walking through local walls is open (needs the user's answer whether it is new). Tasks 6 and 7 use the new defaults.
+
+### Task 5b: announce the network id of the twin
+
+**Files:** `DZOMS_IdList.c`, `DZOMS_ServerWorld.c`, `DZOMS_Proximity.c`, `DZOMS_ClientWorld.c`; tests `Test_Proximity.c`
+
+**Interfaces:**
+- `DZOMS_IdList` gets `ref array<int> netLow, netHigh` (filled for `OBJECTS_NETWORKED`, empty for `OBJECTS_LOCAL`), `AddNet(batch, index, low, high)`, `bool HasNetIds()`; `IsValid()` also requires equal lengths of the net id arrays when present; `Broadcast` chunking copies them.
+- `DZOMS_ServerWorld.GetNetworkId(int objectIndex, out int low, out int high)` (false unless promoted); `SendFullSet` and the announcements carry the ids.
+- Client: `HandleNetworked` ignores a list without net ids; pending swaps keep the ids; a swap completes only when `g_Game.GetObjectByNetworkId(low, high)` returns an object of the same type name within 5 cm of the entry position (not the local copy); otherwise it stays pending until the timeout.
+
+- [ ] **Step 1: Write the failing tests:** announcements and the full set carry the real network ids of the promoted copies; a list without net ids is ignored by the client; a decoy (a different networked object of the same type at the same position, announced with other ids) does **not** delete the local copy and times out; the real twin with its ids does; ids of a deleted twin leave the swap pending.
+- [ ] **Step 2: Run** unit; fail. **Step 3: Implement.** **Step 4: Run** all scenarios on 1.29 and 1.30. **Step 5: Commit.**
+
+---
+
 ## Phase B: the real rules (only after a positive check)
 
 Same branch. Remove the prototype copy of `DZOMS_ClimbProbe.c` first (`git rm`, commit `Remove climb logging build`) unless the user wants to keep it for the final check.
@@ -171,7 +189,7 @@ Same branch. Remove the prototype copy of `DZOMS_ClimbProbe.c` first (`git rm`, 
 **Files:** `DZOMS_Config.c`, `DZOMS_ServerWorld.c`/`DZOMS_Proximity.c` (read them), `Test_Config.c`, `Test_Proximity.c`
 
 **Interfaces:**
-- Produces on `DZOMS_Config` (DESIGN 13.7): `float networkRadius, vehicleRadius, maxFootSpeed, maxVehicleSpeed, maxHeight`, `int maxNetworked`, `ref array<string> proximityExclude`, `bool disableProximity`; defaults 40, 15, 6, 8, 20, 4000, none, false; radii clamped 5..200 with a warning like the existing distances; `maxNetworked` clamped 1..20000; `DZOMS_ProximityConfig.FromConfig(DZOMS_Config)`.
+- Produces on `DZOMS_Config` (DESIGN 13.7): `float networkRadius, vehicleRadius, maxFootSpeed, maxVehicleSpeed, maxHeight`, `int maxNetworked`, `ref array<string> proximityExclude`, `bool disableProximity`; defaults 150, 40, 6, 8, 20, 6000, none, false; radii clamped 5..500 with a warning like the existing distances; `maxNetworked` clamped 1..20000; `DZOMS_ProximityConfig.FromConfig(DZOMS_Config)`.
 - `proximityExclude` uses the pattern rules of 5.3 without `@` tokens: an `@` token or empty pattern is a config error (logged, ignored) like in `DZOMS_NetworkRules.Parse`; types matching are not in the grid index.
 
 - [ ] **Step 1: Write the failing tests:** the defaults on a missing file and on `{ "maps": [] }`; each field clamped or defaulted; `proximityExclude` excludes a type by name and by glob, an `@doors` entry is reported; `disableProximity` true: `Init` builds nothing, `Update` promotes nothing, objects stay local; an existing version 1 `config.json` without the new fields loads with the defaults and is not rewritten (no migration, no `.bak`).
