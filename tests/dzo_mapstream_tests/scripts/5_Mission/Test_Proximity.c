@@ -279,9 +279,228 @@ class DZOMS_Test_Proximity
 		capped.Destroy();
 	}
 
+	static DZOMS_PlayerState Player(int id, vector pos, bool alive)
+	{
+		DZOMS_PlayerState p = new DZOMS_PlayerState();
+		p.id = id;
+		p.pos = pos;
+		p.alive = alive;
+		return p;
+	}
+
+	static array<ref DZOMS_PlayerState> Players(DZOMS_PlayerState a, DZOMS_PlayerState b)
+	{
+		array<ref DZOMS_PlayerState> list = new array<ref DZOMS_PlayerState>();
+		if (a)
+		{
+			list.Insert(a);
+		}
+		if (b)
+		{
+			list.Insert(b);
+		}
+		return list;
+	}
+
+	// objects of a type at a position (5 cm), and how many of them have a network id
+	static int CountAt(string type, vector pos, out int networked)
+	{
+		array<Object> found = new array<Object>();
+		g_Game.GetObjectsAtPosition3D(pos, 0.3, found, null);
+		int n = 0;
+		networked = 0;
+		for (int i = 0; i < found.Count(); i++)
+		{
+			Object o = found.Get(i);
+			if (!o || o.IsPendingDeletion() || o.GetType() != type || vector.Distance(o.GetPosition(), pos) > 0.05)
+			{
+				continue;
+			}
+			n++;
+			int low, high;
+			o.GetNetworkID(low, high);
+			if (low != 0 || high != 0)
+			{
+				networked++;
+			}
+		}
+		return n;
+	}
+
+	static int PromotedAmong(DZOMS_ServerWorld w, int from, int to)
+	{
+		int n = 0;
+		for (int i = from; i <= to; i++)
+		{
+			if (w.IsPromoted(i))
+			{
+				n++;
+			}
+		}
+		return n;
+	}
+
+	static int AnnouncedIds(DZOMS_ServerWorld w, int rpcType)
+	{
+		int n = 0;
+		for (int i = 0; i < w.m_BroadcastTypes.Count(); i++)
+		{
+			if (w.m_BroadcastTypes.Get(i) == rpcType)
+			{
+				n += w.m_BroadcastLists.Get(i).Count();
+			}
+		}
+		return n;
+	}
+
+	static void RunPromotion()
+	{
+		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -250";
+		string mapsDir = DZOMS_T.DIR + "/DZE_prox_promo";
+		MakeDirectory(DZOMS_T.DIR);
+		MakeDirectory(mapsDir);
+		EditorSaveData data = new EditorSaveData();
+		for (int i = 0; i < 10; i++)
+		{
+			DZOMS_TestFixtures.AddObject(data, "Apple", base + Vector(i * 4, 0, 0), "0 0 0", 1, 0);
+		}
+		DZOMS_TestFixtures.AddObject(data, "Apple", base + "0 0 41", "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "Apple", base + "100 0 0", "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "Land_House_1W10", base + "0 0 15", "0 0 0", 1, 0);
+		DZOMS_TestFixtures.AddObject(data, "DZOMS_No_Such_Class", base + "5 0 5", "0 0 0", 1, 0);
+		DZOMS_TestFixtures.Save(data, mapsDir + "/promo.dze");
+		DZOMS_Config c = new DZOMS_Config();
+		c.maps = new array<ref DZOMS_MapEntry>();
+		DZOMS_MapEntry e = new DZOMS_MapEntry();
+		e.file = "promo.dze";
+		c.maps.Insert(e);
+		c.networked = {"Land_House_1W10"};
+		c.Normalize();
+		DZOMS_ServerWorld w = new DZOMS_ServerWorld(c, mapsDir, new DZOMS_ObjectProbe());
+		w.m_Offline = true;
+		w.Load();
+		DZOMS_T.EqInt(w.GetObjectCount(), 14, "promotion world: 14 objects");
+		string digest = w.GetDigest();
+		string hashes = "";
+		for (int h = 0; h < w.GetManifest().hashes.Count(); h++)
+		{
+			hashes += w.GetManifest().hashes.Get(h);
+		}
+		Object houseBefore = w.GetSpawned().Get(12);
+		DZOMS_T.Check(houseBefore != null, "rule networked house exists");
+		DZOMS_T.Check(w.GetSpawned().Get(13) == null, "missing class has no object");
+
+		DZOMS_Proximity prox = new DZOMS_Proximity();
+		prox.Init(w);
+		DZOMS_PlayerState a = Player(1, base, false);
+
+		// a dead player has no zone
+		prox.Update(Players(a, null), 0);
+		prox.ProcessQueue(0);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "dead player: nothing promoted");
+
+		// alive: nearest first, at most CREATES_PER_FRAME per call
+		a.alive = true;
+		prox.Update(Players(a, null), 1000);
+		prox.ProcessQueue(1000);
+		DZOMS_T.EqInt(w.GetPromotedCount(), DZOMS_Proximity.CREATES_PER_FRAME, "first call promotes the per-frame budget");
+		DZOMS_T.EqInt(PromotedAmong(w, 0, 4), 5, "the 5 nearest objects went first");
+		int nets;
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "promoted object: one copy at its position");
+		DZOMS_T.EqInt(nets, 1, "promoted object: the copy is networked");
+		DZOMS_T.EqInt(CountAt("Apple", base + "20 0 0", nets), 1, "not yet promoted: one copy");
+		DZOMS_T.EqInt(nets, 0, "not yet promoted: still local");
+		prox.ProcessQueue(1001);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "second call promotes the rest");
+		DZOMS_T.Check(!w.IsPromoted(10) && !w.IsPromoted(11), "outside 40 m and far objects stay local");
+		DZOMS_T.Check(!w.IsPromoted(12) && w.GetSpawned().Get(12) == houseBefore, "rule networked object untouched");
+		DZOMS_T.Check(!w.IsPromoted(13), "failed object untouched");
+		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 0, "no announcement before the swap delay");
+		prox.ProcessQueue(1600);
+		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 10, "all 10 announced after the swap delay");
+		DZOMS_T.EqInt(prox.GetNetworkedCount(), 10, "counter: 10 networked");
+		DZOMS_T.EqInt(prox.GetPromotions(), 10, "counter: 10 promotions");
+
+		// the interval: an update 500 ms later does nothing, a zone that moved away needs the release delay
+		a.pos = base + "0 0 500";
+		prox.Update(Players(a, null), 1500);
+		prox.ProcessQueue(1600);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "update inside the interval changes nothing");
+		prox.Update(Players(a, null), 2500);
+		prox.ProcessQueue(2500);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "nothing is released before the release delay");
+
+		// release: local copy first, networked copy deleted after the swap delay
+		prox.Update(Players(a, null), 32000);
+		prox.ProcessQueue(32000);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "released after the release delay");
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 2, "right after the demotion both copies exist");
+		DZOMS_T.EqInt(nets, 1, "right after the demotion one of them is networked");
+		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_LOCAL), 10, "the demotion was announced");
+		prox.ProcessQueue(32600);
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "after the swap delay one copy is left");
+		DZOMS_T.EqInt(nets, 0, "and it is local");
+		DZOMS_T.EqInt(prox.GetDemotions(), 10, "counter: 10 demotions");
+
+		// two players: objects near the second one stay networked
+		a.pos = base;
+		prox.Update(Players(a, null), 33000);
+		prox.ProcessQueue(33000);
+		prox.ProcessQueue(33001);
+		string which = "";
+		for (int pw = 0; pw < w.GetObjectCount(); pw++)
+		{
+			if (w.IsPromoted(pw))
+			{
+				which += pw.ToString() + " ";
+			}
+		}
+		DZOMS_T.EqInt(w.GetPromotedCount(), 10, "promoted again: " + which);
+		a.pos = base + "0 0 500";
+		DZOMS_PlayerState b = Player(2, base + "70 0 0", true);
+		prox.Update(Players(a, b), 34000);
+		prox.ProcessQueue(34000);
+		prox.Update(Players(a, b), 65000);
+		prox.ProcessQueue(65000);
+		DZOMS_T.EqInt(PromotedAmong(w, 0, 2), 0, "more than radius + hysteresis from both players: released");
+		DZOMS_T.EqInt(PromotedAmong(w, 3, 7), 5, "inside the hysteresis band of the second player: kept");
+		DZOMS_T.EqInt(PromotedAmong(w, 8, 9), 2, "inside the second player's zone: kept");
+		prox.ProcessQueue(65600);
+
+		// a failed local respawn keeps the networked copy
+		a.pos = base;
+		b.alive = false;
+		prox.Update(Players(a, b), 66000);
+		prox.ProcessQueue(66000);
+		prox.ProcessQueue(66001);
+		// 10 near the first player, plus the apple 100 m away that the second player's zone promoted
+		DZOMS_T.EqInt(w.GetPromotedCount(), 11, "promoted a third time");
+		w.GetObjects().Get(3).type = "DZOMS_No_Such_Class";
+		a.pos = base + "0 0 500";
+		prox.Update(Players(a, b), 97000);
+		prox.ProcessQueue(97000);
+		prox.ProcessQueue(97001);
+		DZOMS_T.Check(w.IsPromoted(3), "failed local respawn: still promoted");
+		DZOMS_T.EqInt(CountAt("Apple", base + "12 0 0", nets), 1, "failed local respawn: the networked copy is kept");
+		DZOMS_T.EqInt(nets, 1, "failed local respawn: and it is networked");
+		DZOMS_T.EqInt(w.GetPromotedCount(), 1, "failed local respawn: the others were released");
+		DZOMS_T.Check(prox.GetFailures() >= 1, "failed local respawn is counted");
+
+		// promotion and demotion do not touch the data
+		DZOMS_T.Eq(w.GetDigest(), digest, "digest unchanged");
+		string hashesAfter = "";
+		for (int k = 0; k < w.GetManifest().hashes.Count(); k++)
+		{
+			hashesAfter += w.GetManifest().hashes.Get(k);
+		}
+		DZOMS_T.Eq(hashesAfter, hashes, "batch hashes unchanged");
+		w.Destroy();
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("proximity");
+		RunPromotion();
 		RunProtocol();
 		RunServerState();
 		RunClientSwap();

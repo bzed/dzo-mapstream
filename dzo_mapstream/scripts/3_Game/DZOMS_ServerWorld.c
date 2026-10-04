@@ -225,6 +225,66 @@ class DZOMS_ServerWorld
 		}
 	}
 
+	protected ref DZOMS_Proximity m_Proximity;
+
+	// after Load(): proximity networking for this world (DESIGN 13)
+	void StartProximity()
+	{
+		m_Proximity = new DZOMS_Proximity();
+		m_Proximity.Init(this);
+	}
+
+	DZOMS_Proximity GetProximity()
+	{
+		return m_Proximity;
+	}
+
+	// local object i -> networked copy (DESIGN 13.4). The networked copy exists before the local
+	// one is deleted. False (nothing changed) when it cannot be spawned.
+	bool Promote(int i)
+	{
+		if (i < 0 || i >= m_Objects.Count() || m_Promoted.Get(i))
+		{
+			return false;
+		}
+		Object old = m_Spawned.Get(i);
+		if (!old)
+		{
+			return false;
+		}
+		Object fresh = SpawnOnServer(m_Objects.Get(i), true);
+		if (!fresh)
+		{
+			return false;
+		}
+		g_Game.ObjectDelete(old);
+		m_Spawned.Set(i, fresh);
+		MarkPromoted(i, true);
+		return true;
+	}
+
+	// networked copy -> local object. The local copy is spawned first; the caller deletes oldNetworked
+	// a moment later (the clients need their local copy back first). False (nothing changed) when the
+	// local copy cannot be spawned.
+	bool Demote(int i, out Object oldNetworked)
+	{
+		oldNetworked = null;
+		if (i < 0 || i >= m_Objects.Count() || !m_Promoted.Get(i))
+		{
+			return false;
+		}
+		Object old = m_Spawned.Get(i);
+		Object fresh = SpawnOnServer(m_Objects.Get(i), false);
+		if (!fresh)
+		{
+			return false;
+		}
+		m_Spawned.Set(i, fresh);
+		MarkPromoted(i, false);
+		oldNetworked = old;
+		return true;
+	}
+
 	int GetObjectCount()
 	{
 		return m_Objects.Count();
