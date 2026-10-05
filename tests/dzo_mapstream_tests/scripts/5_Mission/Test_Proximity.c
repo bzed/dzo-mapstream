@@ -268,7 +268,7 @@ class DZOMS_Test_Proximity
 		w.HandleLocal(One(nearIndex, 1), DZOMS_Test_ClientSpawn.s_Time);
 		g_Game.ObjectDelete(off);
 
-		// a twin with another scale than its entry does not replace the local copy
+		// a twin shows up with scale 1 (the scale is not replicated): the client gives it the entry's scale
 		array<ref DZOMS_ObjectEntry> sl = new array<ref DZOMS_ObjectEntry>();
 		vector sbase = base + "100 0 0";
 		sl.Insert(new DZOMS_ObjectEntry("Apple", sbase, "0 0 0", 2, 0));
@@ -290,11 +290,9 @@ class DZOMS_Test_Proximity
 		scaledTwin.GetNetworkID(stLow, stHigh);
 		sw.HandleNetworked(OneNet(0, 0, stLow, stHigh), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
-		DZOMS_T.Check(sw.GetClientBatch(0).objects.Get(0) == scaledCopy, "a twin with scale 1 does not replace a scale 2 entry");
-		DZOMS_T.Check(sw.GetScaleMismatchCount() >= 1, "the scale mismatch is counted");
-		scaledTwin.SetScale(2);
-		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
-		DZOMS_T.Check(sw.GetClientBatch(0).objects.Get(0) == null, "a twin with the entry's scale takes over");
+		DZOMS_T.Check(sw.GetClientBatch(0).objects.Get(0) == null, "the twin took over after it was given the entry's scale");
+		DZOMS_T.EqFloat(scaledTwin.GetScale(), 2, "the twin has the entry's scale now");
+		DZOMS_T.EqInt(sw.GetScaleFixedCount(), 1, "the scaled twin is counted");
 		g_Game.ObjectDelete(scaledTwin);
 		sw.Destroy();
 

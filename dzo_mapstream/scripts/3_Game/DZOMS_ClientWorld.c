@@ -74,6 +74,7 @@ class DZOMS_ClientWorld
 	protected int m_SwapsDone;
 	protected int m_TwinMismatch;
 	protected int m_ScaleMismatch;
+	protected int m_ScaleFixed;
 	protected ref map<string, int> m_TwinLogged = new map<string, int>();
 	protected int m_AnnounceDropped;
 
@@ -279,7 +280,7 @@ class DZOMS_ClientWorld
 			}
 		}
 		DZOMS_Log.Info("status: camera " + m_Camera.ToString() + ", " + received.ToString() + "/" + m_Batches.Count().ToString() + " batches received, nearest " + Math.Round(nearest).ToString() + " m away (view distance " + Math.Round(m_Manifest.viewDistance).ToString() + " m), " + loaded.ToString() + " loaded, " + objects.ToString() + " local objects alive");
-		DZOMS_Log.Info("swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_TwinMismatch.ToString() + " displaced twins, " + m_ScaleMismatch.ToString() + " scale mismatches, " + m_NetworkedIds.Count().ToString() + " announced");
+		DZOMS_Log.Info("swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_TwinMismatch.ToString() + " displaced twins, " + m_ScaleMismatch.ToString() + " scale mismatches, " + m_ScaleFixed.ToString() + " twins scaled, " + m_NetworkedIds.Count().ToString() + " announced");
 	}
 
 	bool IsFailedType(string type)
@@ -787,6 +788,12 @@ class DZOMS_ClientWorld
 		return m_TwinMismatch;
 	}
 
+	// twins that were given their entry's scale
+	int GetScaleFixedCount()
+	{
+		return m_ScaleFixed;
+	}
+
 	// twins that exist at the right place but with another scale than their entry
 	int GetScaleMismatchCount()
 	{
@@ -976,19 +983,25 @@ class DZOMS_ClientWorld
 			}
 			return false;
 		}
-		// the twin must have the entry's scale, or the local copy (which has it) stays: found in game
-		// with a scale 2 pier that changed place when its networked copy took over
+		// the scale of an object is not replicated: the twin shows up with scale 1. Give it the entry's
+		// scale here; if that does not stick, the local copy stays (found in game: unscaled twins
+		// next to the scaled local copy)
 		if (Math.AbsFloat(twin.GetScale() - scale) > 0.01)
 		{
-			m_ScaleMismatch++;
-			int scaleLogged = 0;
-			m_TwinLogged.Find(type + "#scale", scaleLogged);
-			if (scaleLogged < 3)
+			twin.SetScale(scale);
+			if (Math.AbsFloat(twin.GetScale() - scale) > 0.01)
 			{
-				m_TwinLogged.Set(type + "#scale", scaleLogged + 1);
-				DZOMS_Log.Warn("swap: twin of " + type + " has scale " + twin.GetScale().ToString() + ", the entry " + scale.ToString());
+				m_ScaleMismatch++;
+				int scaleLogged = 0;
+				m_TwinLogged.Find(type + "#scale", scaleLogged);
+				if (scaleLogged < 3)
+				{
+					m_TwinLogged.Set(type + "#scale", scaleLogged + 1);
+					DZOMS_Log.Warn("swap: twin of " + type + " keeps scale " + twin.GetScale().ToString() + ", the entry " + scale.ToString());
+				}
+				return false;
 			}
-			return false;
+			m_ScaleFixed++;
 		}
 		return true;
 	}
