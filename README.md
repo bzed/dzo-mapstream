@@ -189,6 +189,9 @@ minute how many objects are networked, how many were swapped in the last minute,
 the object types promoted most often; the last list is what to put into `proximityExclude`.
 `disableProximity` switches all of this off.
 
+The server keeps the object it swaps out for five seconds, so the zombies' path graph (the AI's idea of
+where walls are) has time to take the new object in.
+
 Server and players must run the same version of the mod (the protocol changed). The first join
 after an update downloads the maps again, because model objects are now stored at the position the
 engine puts them, which is where the Editor shows them.

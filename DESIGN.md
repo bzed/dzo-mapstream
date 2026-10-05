@@ -1040,6 +1040,19 @@ parameter), then **rewrites the entry to the object's actual origin and yaw in d
 (`DZOMS_Placement.Apply`), respawns on the server do the same, and a networked twin (created by the same
 call) already stands there. Batch data and hashes change once for maps with models.
 
+### 13.10e Zombies right after a login (release candidate, 2026-10-05)
+
+Driving and flying past work. Right after a login inside a mapped area, zombies that spawn run through
+walls for a while; it fixes itself after some time. At a login the zone opens after 2 s and a few hundred
+objects are swapped within seconds (378 in the log, 0.15 to 0.5 s of server time per minute). The
+engine rebuilds the path graph for the new objects (`ECE_UPDATEPATHGRAPH`) asynchronously, while the
+server deleted the old local copy, with its obstacle, at once: there was a window without any obstacle.
+Now the server keeps the old copy for `OLD_COPY_DELAY_MS` (5 s) after a swap, in both directions (the
+networked copy is also deleted late when an object goes back to local), so the new copy's obstacle is in
+before the old one goes. The delay is a guess and a constant; a log with the zombie behaviour decides.
+Also seen: the types promoted most (`debugLog` report) include plants (`bldr_plnt_*`): nobody climbs those;
+`proximityExclude` is for them.
+
 ### 13.11 Where it lives
 
 | Where | Change |

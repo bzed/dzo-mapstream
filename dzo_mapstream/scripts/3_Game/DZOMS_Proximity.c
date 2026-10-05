@@ -53,6 +53,7 @@ class DZOMS_Proximity
 	static const int RETRY_DELAY_MS = 60000;
 	static const int CAP_WARN_INTERVAL_MS = 60000;
 	static const int SWAP_DELAY_MS = 500;
+	static const int OLD_COPY_DELAY_MS = 5000;	// the server keeps the old copy this long (path graph, DESIGN 13.10e)
 	static const int CREATES_PER_FRAME = 5;
 	static const int DELETES_PER_FRAME = 10;
 
@@ -463,8 +464,11 @@ class DZOMS_Proximity
 				continue;
 			}
 			creates--;
-			if (m_World.Promote(pi))
+			Object oldLocal;
+			if (m_World.PromoteKeepOld(pi, oldLocal))
 			{
+				m_DeleteObjects.Insert(oldLocal);
+				m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
 				m_Networked.Insert(pi);
 				m_NeededAt.Set(pi, nowMs);
 				m_AnnounceIdx.Insert(pi);
@@ -510,7 +514,7 @@ class DZOMS_Proximity
 				}
 				toLocal.Add(m_World.GetObjectBatch(di), m_World.GetObjectIndexInBatch(di));
 				m_DeleteObjects.Insert(oldNetworked);
-				m_DeleteDue.Insert(nowMs + SWAP_DELAY_MS);
+				m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
 				m_Demotions++;
 				changed = true;
 			}

@@ -270,6 +270,20 @@ class DZOMS_ServerWorld
 	// one is deleted. False (nothing changed) when it cannot be spawned.
 	bool Promote(int i)
 	{
+		Object old;
+		if (!PromoteKeepOld(i, old))
+		{
+			return false;
+		}
+		g_Game.ObjectDelete(old);
+		return true;
+	}
+
+	// as Promote, but the caller deletes the old local copy later: the path graph needs time to take the new
+	// object in, and zombies walk through the gap when the old obstacle is gone before that
+	bool PromoteKeepOld(int i, out Object oldLocal)
+	{
+		oldLocal = null;
 		if (i < 0 || i >= m_Objects.Count() || m_Promoted.Get(i))
 		{
 			return false;
@@ -291,7 +305,7 @@ class DZOMS_ServerWorld
 		{
 			promoted.DisableSimulation(true);
 		}
-		g_Game.ObjectDelete(old);
+		oldLocal = old;
 		m_Spawned.Set(i, fresh);
 		MarkPromoted(i, true);
 		return true;

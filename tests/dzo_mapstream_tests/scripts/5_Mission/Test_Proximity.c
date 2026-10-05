@@ -562,8 +562,8 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(w.GetPromotedCount(), DZOMS_Proximity.CREATES_PER_FRAME, "first call promotes the per-frame budget");
 		DZOMS_T.EqInt(PromotedAmong(w, 0, 4), 5, "the 5 nearest objects went first");
 		int nets;
-		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "promoted object: one copy at its position");
-		DZOMS_T.EqInt(nets, 1, "promoted object: the copy is networked");
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 2, "promoted object: the old local copy stays for a while (path graph)");
+		DZOMS_T.EqInt(nets, 1, "promoted object: one of the copies is networked");
 		DZOMS_T.EqInt(CountAt("Apple", base + Vector(r * 0.5, 0, 0), nets), 1, "not yet promoted: one copy");
 		DZOMS_T.EqInt(nets, 0, "not yet promoted: still local");
 		prox.ProcessQueue(1001);
@@ -574,6 +574,9 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 0, "no announcement before the swap delay");
 		prox.ProcessQueue(1600);
 		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_NETWORKED), 10, "all 10 announced after the swap delay");
+		prox.ProcessQueue(1000 + DZOMS_Proximity.OLD_COPY_DELAY_MS + 10);
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "promoted object: the old local copy is gone after the delay");
+		DZOMS_T.EqInt(nets, 1, "promoted object: the copy left is networked");
 		int idBad = 0;
 		for (int al = 0; al < w.m_BroadcastLists.Count(); al++)
 		{
@@ -616,8 +619,8 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(CountAt("Apple", base, nets), 2, "right after the demotion both copies exist");
 		DZOMS_T.EqInt(nets, 1, "right after the demotion one of them is networked");
 		DZOMS_T.EqInt(AnnouncedIds(w, DZOMS_Rpc.OBJECTS_LOCAL), 10, "the demotion was announced");
-		prox.ProcessQueue(32600);
-		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "after the swap delay one copy is left");
+		prox.ProcessQueue(32000 + DZOMS_Proximity.OLD_COPY_DELAY_MS + 10);
+		DZOMS_T.EqInt(CountAt("Apple", base, nets), 1, "after the delay one copy is left");
 		DZOMS_T.EqInt(nets, 0, "and it is local");
 		DZOMS_T.EqInt(prox.GetDemotions(), 10, "counter: 10 demotions");
 
