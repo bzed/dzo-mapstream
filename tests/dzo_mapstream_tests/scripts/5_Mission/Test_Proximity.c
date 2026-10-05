@@ -2,7 +2,7 @@
 class DZOMS_Test_Proximity
 {
 	// a server world with n local apples 10 m apart (class "Apple" is local without rules)
-	static DZOMS_ServerWorld MakeWorld(string name, int n, vector at, bool pathgraphRegions = false)
+	static DZOMS_ServerWorld MakeWorld(string name, int n, vector at)
 	{
 		string mapsDir = DZOMS_T.DIR + "/DZE_" + name;
 		MakeDirectory(DZOMS_T.DIR);
@@ -18,7 +18,6 @@ class DZOMS_Test_Proximity
 		DZOMS_MapEntry e = new DZOMS_MapEntry();
 		e.file = name + ".dze";
 		c.maps.Insert(e);
-		c.experimentalPathgraphRegions = pathgraphRegions;
 		c.Normalize();
 		DZOMS_ServerWorld w = new DZOMS_ServerWorld(c, mapsDir, new DZOMS_ObjectProbe());
 		w.m_Offline = true;
@@ -682,47 +681,6 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
-	// experimentalKeepLocalCopy: promotion keeps the server's local copy, demotion reuses it
-	static void RunKeepLocal()
-	{
-		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -180";
-		DZOMS_ServerWorld w = MakeWorld("prox_keep", 3, base);
-		w.GetConfig().experimentalKeepLocalCopy = true;
-		w.GetConfig().experimentalNoPathgraph = true;
-		DZOMS_Proximity prox = new DZOMS_Proximity();
-		prox.Init(w);
-		Object localBefore = w.GetSpawned().Get(1);
-		DZOMS_PlayerState a = Player(1, base, true);
-		prox.Update(Players(a, null), 0);
-		prox.ProcessQueue(0);
-		DZOMS_T.EqInt(w.GetPromotedCount(), 3, "keep local: 3 promoted");
-		int nets;
-		DZOMS_T.EqInt(CountAt("Apple", base + "10 0 0", nets), 2, "keep local: both copies exist on the server");
-		DZOMS_T.EqInt(nets, 1, "keep local: one of them is networked");
-		DZOMS_T.Check(w.GetSpawned().Get(1) != localBefore, "keep local: the slot is the networked copy");
-
-		// demotion reuses the kept local copy: no spawn, so it cannot fail
-		w.GetObjects().Get(1).type = "DZOMS_No_Such_Class";
-		a.pos = base + Vector(0, 0, 10000);
-		prox.Update(Players(a, null), 40000);
-		prox.ProcessQueue(40000);
-		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "keep local: all demoted, also the one whose class cannot be spawned");
-		DZOMS_T.Check(w.GetSpawned().Get(1) == localBefore, "keep local: demotion put the original local copy back");
-		DZOMS_T.EqInt(prox.GetFailures(), 0, "keep local: no failures");
-		prox.ProcessQueue(40600);
-		DZOMS_T.EqInt(CountAt("Apple", base + "10 0 0", nets), 1, "keep local: one copy left after the swap delay");
-		DZOMS_T.EqInt(nets, 0, "keep local: and it is local");
-		w.Destroy();
-	}
-
-	static void RunPathgraphRegions()
-	{
-		DZOMS_ServerWorld w = MakeWorld("prox_regions", 3, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -150", true);
-		DZOMS_T.EqInt(w.GetObjectCount(), 3, "loading with path graph regions: 3 objects");
-		DZOMS_T.Check(w.GetSpawned().Get(0) != null, "loading with path graph regions: objects exist");
-		w.Destroy();
-	}
-
 	static void RunDisabled()
 	{
 		DZOMS_ServerWorld w = MakeWorld("prox_off", 2, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -120");
@@ -895,8 +853,6 @@ class DZOMS_Test_Proximity
 		RunModelPlacement();
 		RunModelEntries();
 		RunDisabled();
-		RunPathgraphRegions();
-		RunKeepLocal();
 		RunPromotion();
 		RunProtocol();
 		RunServerState();

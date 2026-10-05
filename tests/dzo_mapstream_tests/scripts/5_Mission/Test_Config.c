@@ -151,21 +151,13 @@ class DZOMS_Test_Config
 		}
 		DZOMS_T.EqInt(c.batchSize, 1000, "batchSize clamped down");
 
-		// experimental proximity switches (default off, zero values)
-		dir = CaseDir("experiments");
+		// proximity networking switch
+		dir = CaseDir("proximity_off");
 		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(!c.experimentalKeepLocalCopy && !c.experimentalNoPathgraph, "experiments are off by default");
 		DZOMS_T.Check(!c.disableProximity, "proximity networking is on by default");
-		DZOMS_T.Check(!c.experimentalPathgraphRegions, "path graph regions are off by default");
-		WriteText(dir + "/config.json", "{ \"experimentalPathgraphRegions\": true }");
-		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(c.experimentalPathgraphRegions, "path graph regions can be switched on");
 		WriteText(dir + "/config.json", "{ \"disableProximity\": true }");
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(c.disableProximity, "proximity networking can be switched off");
-		WriteText(dir + "/config.json", "{ \"experimentalKeepLocalCopy\": true, \"experimentalNoPathgraph\": true }");
-		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(c.experimentalKeepLocalCopy && c.experimentalNoPathgraph, "experiments can be switched on");
 
 		// config version (DESIGN 13.5)
 		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(0), 1, "EffectiveVersion 0 is 1");

@@ -341,7 +341,7 @@ class DZOMS_Proximity
 		{
 			m_World.BroadcastLocal(toLocal);
 		}
-		if (changed && !m_World.GetConfig().experimentalNoPathgraph)
+		if (changed)
 		{
 			g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
 		}

@@ -309,59 +309,6 @@ class DZOMS_ClientWorld
 		}
 	}
 
-	static ref map<string, int> s_ModelPlacementLogged;
-
-	// how far the engine put a model object from its entry (first 3 per model), to see what a client does
-	protected static void LogModelPlacement(string type, Object model, vector pos, vector ori)
-	{
-		if (!s_ModelPlacementLogged)
-		{
-			s_ModelPlacementLogged = new map<string, int>();
-		}
-		float off = vector.Distance(model.GetPosition(), pos);
-		if (off < 0.02)
-		{
-			return;
-		}
-		int logged = 0;
-		s_ModelPlacementLogged.Find(type, logged);
-		if (logged >= 3)
-		{
-			return;
-		}
-		s_ModelPlacementLogged.Set(type, logged + 1);
-		DZOMS_Log.Info("placement: " + type + " created " + off.ToString() + " m from its entry, corrected");
-	}
-
-	static ref map<string, int> s_ScaleShiftLogged;
-
-	static void LogScaleShiftPublic(string type, Object obj, vector pos, float scale)
-	{
-		LogScaleShift(type, obj, pos, scale);
-	}
-
-	// does SetScale move the object on this client? (first 3 per type; scaled objects stand elsewhere than in the Editor)
-	protected static void LogScaleShift(string type, Object obj, vector pos, float scale)
-	{
-		if (!s_ScaleShiftLogged)
-		{
-			s_ScaleShiftLogged = new map<string, int>();
-		}
-		vector moved = obj.GetPosition() - pos;
-		if (moved.Length() < 0.02)
-		{
-			return;
-		}
-		int logged = 0;
-		s_ScaleShiftLogged.Find(type, logged);
-		if (logged >= 3)
-		{
-			return;
-		}
-		s_ScaleShiftLogged.Set(type, logged + 1);
-		DZOMS_Log.Info("scale: " + type + " s=" + scale.ToString() + " moved " + moved.ToString() + " by SetScale");
-	}
-
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
 	static Object SpawnLocal(string type, vector pos, vector ori, float scale, int flags)
 	{
@@ -375,7 +322,6 @@ class DZOMS_ClientWorld
 			Object model = g_Game.CreateStaticObjectUsingP3D(type, pos, ori * Math.DEG2RAD, scale, true);
 			if (model)
 			{
-				LogModelPlacement(type, model, pos, ori);
 				DZOMS_Placement.Apply(model, pos, ori, scale);
 			}
 			return model;
@@ -387,13 +333,11 @@ class DZOMS_ClientWorld
 		}
 		// the engine may move a new object (terrain, water); the entry says where it stands
 		// (the Editor's loader does the same)
-		LogModelPlacement(type, obj, pos, ori);
 		obj.SetPosition(pos);
 		obj.SetOrientation(ori);
 		if (scale != 1)
 		{
 			obj.SetScale(scale);
-			LogScaleShift(type, obj, pos, scale);
 		}
 		obj.Update();
 		return obj;

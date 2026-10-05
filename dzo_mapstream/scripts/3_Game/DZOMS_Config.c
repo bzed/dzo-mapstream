@@ -32,17 +32,8 @@ class DZOMS_Config
 	int batchSize;
 	bool disableCache;
 	bool debugLog;
-	// experiments for the proximity networking problems found in game (DESIGN 13.10a); removed again
-	// once the cause is known. keep: promotion keeps the server's local copy (demotion reuses it).
-	// no pathgraph: the swapped copies are created without ECE_UPDATEPATHGRAPH and the path graph
-	// is not updated after a swap
 	// proximity networking is on unless this is set: objects then stay local and cannot be climbed
 	bool disableProximity;
-	bool experimentalKeepLocalCopy;
-	// after loading, update the path graph region of every map object that can affect it (zombies
-	// walk through the objects otherwise: DESIGN 13.10b)
-	bool experimentalPathgraphRegions;
-	bool experimentalNoPathgraph;
 
 	[NonSerialized()]
 	bool m_LoadFailed;

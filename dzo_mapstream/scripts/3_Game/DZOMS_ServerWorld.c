@@ -110,7 +110,6 @@ class DZOMS_ServerWorld
 	protected ref array<ref DZOMS_Batch> m_Batches = new array<ref DZOMS_Batch>();
 	protected ref array<bool> m_Promoted = new array<bool>();	// per object: a networked copy exists (DESIGN 13.4)
 	protected int m_PromotedCount;
-	protected ref array<Object> m_KeptLocal = new array<Object>();	// experiment: the local copy of a promoted object
 	protected ref array<int> m_ObjectBatch = new array<int>();	// per object: its batch
 	protected ref array<int> m_ObjectIndex = new array<int>();	// per object: its position inside that batch
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
@@ -280,7 +279,7 @@ class DZOMS_ServerWorld
 		{
 			return false;
 		}
-		Object fresh = SpawnOnServerEx(m_Objects.Get(i), true, !m_Config.experimentalNoPathgraph);
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), true, true);
 		if (!fresh)
 		{
 			return false;
@@ -292,14 +291,7 @@ class DZOMS_ServerWorld
 		{
 			promoted.DisableSimulation(true);
 		}
-		if (m_Config.experimentalKeepLocalCopy)
-		{
-			m_KeptLocal.Set(i, old);
-		}
-		else
-		{
-			g_Game.ObjectDelete(old);
-		}
+		g_Game.ObjectDelete(old);
 		m_Spawned.Set(i, fresh);
 		MarkPromoted(i, true);
 		return true;
@@ -316,16 +308,11 @@ class DZOMS_ServerWorld
 			return false;
 		}
 		Object old = m_Spawned.Get(i);
-		Object fresh = m_KeptLocal.Get(i);
-		if (!fresh)
-		{
-			fresh = SpawnOnServerEx(m_Objects.Get(i), false, !m_Config.experimentalNoPathgraph);
-		}
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), false, true);
 		if (!fresh)
 		{
 			return false;
 		}
-		m_KeptLocal.Set(i, null);
 		m_Spawned.Set(i, fresh);
 		MarkPromoted(i, false);
 		oldNetworked = old;
@@ -437,7 +424,6 @@ class DZOMS_ServerWorld
 		if (e.scale != 1)
 		{
 			obj.SetScale(e.scale);
-			DZOMS_ClientWorld.LogScaleShiftPublic(e.type, obj, e.pos, e.scale);
 		}
 		obj.Update();
 		return obj;
@@ -502,30 +488,13 @@ class DZOMS_ServerWorld
 		int pathStart = TickCount(0);
 		g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
 		DZOMS_Log.Info("path graph updated for the map objects in " + (TickCount(pathStart) / 1000).ToString() + " ms");
-		if (m_Config.experimentalPathgraphRegions)
-		{
-			int regions = 0;
-			int regionStart = TickCount(0);
-			for (int r = 0; r < m_Spawned.Count(); r++)
-			{
-				Object affecting = m_Spawned.Get(r);
-				if (affecting && affecting.CanAffectPathgraph())
-				{
-					g_Game.UpdatePathgraphRegionByObject(affecting);
-					regions++;
-				}
-			}
-			DZOMS_Log.Info("path graph regions updated for " + regions.ToString() + " objects in " + (TickCount(regionStart) / 1000).ToString() + " ms");
-		}
 
 		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
 		m_Promoted.Clear();
-		m_KeptLocal.Clear();
 		m_PromotedCount = 0;
 		for (int pi = 0; pi < m_Objects.Count(); pi++)
 		{
 			m_Promoted.Insert(false);
-			m_KeptLocal.Insert(null);
 		}
 		m_Manifest.viewDistance = m_Config.viewDistance;
 		m_Manifest.proxyDistance = m_Config.proxyDistance;
@@ -855,14 +824,6 @@ class DZOMS_ServerWorld
 				g_Game.ObjectDelete(m_Spawned.Get(i));
 			}
 		}
-		for (int k = 0; k < m_KeptLocal.Count(); k++)
-		{
-			if (m_KeptLocal.Get(k))
-			{
-				g_Game.ObjectDelete(m_KeptLocal.Get(k));
-			}
-		}
-		m_KeptLocal.Clear();
 		m_Spawned.Clear();
 		m_Objects.Clear();
 
