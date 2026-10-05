@@ -406,7 +406,7 @@ class DZOMS_ServerWorld
 			{
 				// the engine centres the model's bounding box on the position and does not apply the
 				// orientation like SetOrientation does (DESIGN 13.9); SetOrientation would reset the scale
-				DZOMS_Placement.Apply(model, e.pos, e.ori, e.scale);
+				DZOMS_Placement.ApplyModel(model, e.pos, e.ori, e.scale);
 			}
 			return model;
 		}

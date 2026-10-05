@@ -373,7 +373,7 @@ class DZOMS_ClientWorld
 				// the engine centres the model's bounding box on the position and does not apply the
 				// orientation like SetOrientation does (DESIGN 13.9): put it where the entry says, keeping the scale
 				LogModelPlacement(type, model, pos, ori);
-				DZOMS_Placement.Apply(model, pos, ori, scale);
+				DZOMS_Placement.ApplyModel(model, pos, ori, scale);
 			}
 			return model;
 		}
@@ -1077,7 +1077,8 @@ class DZOMS_ClientWorld
 	{
 		bool model = DZOMS_TypeName.IsModel(type);
 		float off = vector.Distance(twin.GetPosition(), pos);
-		float yawOff = Math.AbsFloat(twin.GetOrientation()[0] - ori[0]);
+		vector wantOri = DZOMS_Placement.ModelOrientation(ori);
+		float yawOff = Math.AbsFloat(twin.GetOrientation()[0] - wantOri[0]);
 		if (yawOff > 180)
 		{
 			yawOff = 360 - yawOff;
@@ -1085,7 +1086,7 @@ class DZOMS_ClientWorld
 		bool scaleOff = Math.AbsFloat(twin.GetScale() - scale) > 0.01;
 		if (model && (off > 0.01 || yawOff > 0.5 || scaleOff))
 		{
-			DZOMS_Placement.Apply(twin, pos, ori, scale);
+			DZOMS_Placement.Apply(twin, pos, wantOri, scale);
 			m_TwinFixed++;
 		}
 		else if (!model && off <= 0.05 && scaleOff)

@@ -334,7 +334,7 @@ class DZOMS_Test_Proximity
 		string modelPath = "dz\\structures\\industrial\\containers\\container_1bo.p3d";
 		array<ref DZOMS_ObjectEntry> ml = new array<ref DZOMS_ObjectEntry>();
 		vector mbase = base + "300 0 0";
-		ml.Insert(new DZOMS_ObjectEntry(modelPath, mbase, "40 0 0", 2, 0));
+		ml.Insert(new DZOMS_ObjectEntry(modelPath, mbase, "0.7 0 0", 2, 0));
 		array<ref DZOMS_Batch> msb = new array<ref DZOMS_Batch>();
 		array<float> mbo = new array<float>();
 		DZOMS_BatchBuilder.Build(ml, 400, msb, mbo);
@@ -349,7 +349,7 @@ class DZOMS_Test_Proximity
 		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
 		Object modelCopy = mw.GetClientBatch(0).objects.Get(0);
 		DZOMS_T.Check(modelCopy != null, "model entry: local copy exists");
-		Object modelTwin = g_Game.CreateStaticObjectUsingP3D(modelPath, mbase, "40 0 0", 2, false);
+		Object modelTwin = g_Game.CreateStaticObjectUsingP3D(modelPath, mbase, "0.2 0 0", 2, false);
 		DZOMS_T.Check(vector.Distance(modelTwin.GetPosition(), mbase) > 0.5, "the raw model twin is off its entry (what the server's engine does)");
 		int mtLow, mtHigh;
 		modelTwin.GetNetworkID(mtLow, mtHigh);
@@ -357,7 +357,7 @@ class DZOMS_Test_Proximity
 		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
 		DZOMS_T.Check(mw.GetClientBatch(0).objects.Get(0) == null, "model entry: the local copy gave way to the twin");
 		DZOMS_T.EqFloat(vector.Distance(modelTwin.GetPosition(), mbase), 0, "model twin: put at the entry position");
-		DZOMS_T.EqFloat(modelTwin.GetOrientation()[0], 40, "model twin: yaw as in the entry");
+		DZOMS_T.EqFloat(modelTwin.GetOrientation()[0], 0.7 * Math.RAD2DEG, "model twin: yaw as in the entry (radians)");
 		DZOMS_T.EqFloat(modelTwin.GetScale(), 2, "model twin: scale as in the entry");
 		g_Game.ObjectDelete(modelTwin);
 		mw.Destroy();
@@ -749,7 +749,7 @@ class DZOMS_Test_Proximity
 				{
 					scale = 2;
 				}
-				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "40 0 0", scale, 0);
+				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "0.7 0 0", scale, 0);
 				Object o = DZOMS_ServerWorld.SpawnOnServer(e, v == 1);
 				string what = "model " + m.ToString() + " networked=" + (v == 1).ToString();
 				DZOMS_T.Check(o != null, what + ": created");
@@ -758,7 +758,7 @@ class DZOMS_Test_Proximity
 					continue;
 				}
 				DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
-				DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+				DZOMS_T.EqFloat(o.GetOrientation()[0], 0.7 * Math.RAD2DEG, what + ": yaw as in the entry (model orientations are radians)");
 				DZOMS_T.EqFloat(o.GetScale(), scale, what + ": scale as in the entry (SetOrientation would reset it)");
 				g_Game.ObjectDelete(o);
 			}
@@ -773,7 +773,7 @@ class DZOMS_Test_Proximity
 		for (int m = 0; m < models.Count(); m++)
 		{
 			vector pos = at + Vector(m * 30, 0, 0);
-			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "40 0 0", 2);
+			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "0.7 0 0", 2);
 			string what = "client model " + m.ToString();
 			DZOMS_T.Check(o != null, what + ": created");
 			if (!o)
@@ -781,7 +781,7 @@ class DZOMS_Test_Proximity
 				continue;
 			}
 			DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
-			DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+			DZOMS_T.EqFloat(o.GetOrientation()[0], 0.7 * Math.RAD2DEG, what + ": yaw as in the entry (model orientations are radians)");
 			DZOMS_T.EqFloat(o.GetScale(), 2, what + ": scale as in the entry");
 			g_Game.ObjectDelete(o);
 		}

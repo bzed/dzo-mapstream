@@ -991,6 +991,23 @@ Build `da91b22`: every living player on foot, radius 40 m, no config.
   in `Position` for model objects is not known; the fix assumes the origin (the same meaning as for
   class objects). If a builder sees models shifted against the Editor, this is the place to look.
 
+### 13.10c Model objects: radians, scale, networked twins (2026-10-05)
+
+- **Orientation of model objects is in radians.** The `.dze` values of `.p3d` entries are multiples of
+  pi/10 (0.314, 0.628, 1.257, -2.827); `CreateStaticObjectUsingP3D` takes radians (yaw 40 comes out as
+  131.83 degrees, which is 40 rad), and the twins' degrees in the client log equal the entry times 180/pi
+  (entry 0.157, twin 8.9999). Class objects use degrees. Builds 4 to 9 passed the radians to
+  `SetOrientation` as degrees and turned every model almost to yaw 0. Fixed: `DZOMS_Placement.ApplyModel`.
+- **`SetOrientation` and `SetYawPitchRoll` reset the scale to 1.** `SetTransform` with a scaled rotation
+  matrix sets position, orientation and scale together and keeps all three.
+- **Scale is not replicated.** A networked twin reaches the client with scale 1. The client gives it the
+  entry's scale, and watches the announced twins (a twin that streams in after a login, or re-enters the
+  network bubble, shows up unscaled again).
+- **A networked model reaches the client at its creation transform**: the server's later correction is not
+  replicated. The server's engine creates a model off its entry (bounding box centre, 0.1 to 10 m in the
+  log); the client puts the twin at the entry (position, yaw, scale). The client's own engine creates local
+  models at the entry within 2 cm, so the entry is the origin.
+
 ### 13.11 Changes
 
 | Where | Change |
