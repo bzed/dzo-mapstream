@@ -26,6 +26,12 @@ This mod does it differently for most objects:
 - Objects that must work for everybody (doors, ladders, levers, wells, ...) stay **networked**: the
   server creates them the normal way. The mod decides which ones with a list of rules (see
   [Networked rules](#networked-rules)); the defaults already cover the usual cases.
+- Everything else becomes networked **only near a player who can use it**: the DayZ client cannot
+  climb or vault onto objects that exist only locally, because the server must agree on which object
+  the player is standing on. So the server swaps the local objects around a player (150 m on foot by
+  default) for real networked copies, and swaps them back once nobody is near. A player in an
+  aircraft or a fast car, or sprinting, gets nothing swapped, so fast movers cost the server
+  almost nothing. See [Climbing and proximity networking](#climbing-and-proximity-networking).
 - Objects that you deleted in the Editor (to clear space on the map) are hidden in the game, too.
 
 ## Installation
@@ -120,6 +126,14 @@ A value of `0` (or a missing line) means "use the default".
 | `proxyDistance` | Networked objects only exist for a player when they are fairly close (about 1000 m). Further away, the player sees a plain copy so the map does not have holes. 100 to 20000. | 1000 |
 | `batchSize` | Maximum objects per batch. 50 to 1000. | 400 |
 | `disableCache` | `true` = players do not keep a copy of the map; they download it on every join. | cache on |
+| `networkRadius` | Radius in meters around a player on foot in which objects become networked. 5 to 500. | 150 |
+| `vehicleRadius` | The same for a slow vehicle. 5 to 500. | 40 |
+| `maxFootSpeed` | On foot and faster than this (m/s): no networked objects for that player. | 6 |
+| `maxVehicleSpeed` | In a vehicle and faster than this (m/s): none. | 8 |
+| `maxHeight` | Higher above the ground than this (m), for example in a helicopter: none. | 20 |
+| `maxNetworked` | The most objects networked at one time by proximity networking. 1 to 20000. | 6000 |
+| `proximityExclude` | Object types that are never made networked by proximity, for example plants: patterns like in the networked rules, without `@`. | none |
+| `disableProximity` | `true` = proximity networking off: objects stay local, and players cannot climb them. | on |
 | `configVersion` | Written by the mod. Do not change it. | 1 |
 | `debugLog` | `true` = write extra details to the log (which objects are networked and why, where every batch is). | off |
 
@@ -150,6 +164,34 @@ checked against the list from top to bottom and **the last matching rule wins**.
 Upper and lower case do not matter. In doubt, keep the defaults. If a door, ladder, lever or well
 from your map does not work, add a rule that makes that type networked. With `debugLog` the log lists
 every networked type and which rule matched it, which tells you what to change.
+
+## Climbing and proximity networking
+
+Players can only climb or vault onto an object that exists **networked**: the DayZ server checks the
+climb and has to know which object the player grabs, and objects that every game creates locally have
+no identity it could use. Networking the whole map would bring back the load this mod avoids, so the
+server networks only what a player can actually use:
+
+- A player on foot who is slower than `maxFootSpeed` (6 m/s, walking and jogging) gets a zone of
+  `networkRadius` (150 m). A player in a vehicle slower than `maxVehicleSpeed` (8 m/s) gets
+  `vehicleRadius` (40 m). Anybody higher than `maxHeight` above the ground, dead, or faster gets no zone.
+  A zone opens after the player has stayed in these limits for two seconds.
+- Objects inside a zone are replaced by networked copies, nearest first, a few per frame. Players
+  see no change: the game removes its local copy only after the networked one has arrived.
+- An object goes back to local when no zone has been near it for 30 seconds (and it is farther than
+  1.5 times the radius, so nothing flickers at the border).
+- The server keeps at most `maxNetworked` objects networked at once; the nearest ones win.
+- Objects the networked rules already make networked (doors, ladders, ...) are not touched.
+
+If the server is busy, make `networkRadius` smaller or `maxNetworked` lower, and add object types that
+nobody climbs (plants, small decoration) to `proximityExclude`. With `debugLog` the server logs once a
+minute how many objects are networked, how many were swapped in the last minute, the time spent, and
+the object types promoted most often; the last list is what to put into `proximityExclude`.
+`disableProximity` switches all of this off.
+
+Server and players must run the same version of the mod (the protocol changed). The first join
+after an update downloads the maps again, because model objects are now stored at the position the
+engine puts them, which is where the Editor shows them.
 
 ## Troubleshooting
 

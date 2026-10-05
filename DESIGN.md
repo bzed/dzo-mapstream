@@ -5,7 +5,8 @@ as plain data instead of thousands of networked objects. The server and every
 client spawn the objects locally. Objects that only work when networked (doors,
 ladders, levers, ...) are spawned as networked objects by the server.
 
-Target: DayZ 1.29 and 1.30. Status: design, nothing implemented yet.
+Target: DayZ 1.29 and 1.30. Status: implemented; section 13 (proximity networking) was added after the first
+in-game tests and is described there, with the findings it rests on.
 
 ## 1. Goals
 
@@ -20,8 +21,7 @@ Target: DayZ 1.29 and 1.30. Status: design, nothing implemented yet.
 6. No unbounded work per frame, no unbounded memory, no trust in client input.
 
 Not in scope for the first version: other map formats, a download progress UI,
-cache encryption (planned, section 12), proximity networking (planned, section 13:
-networked copies near players so that map objects can be climbed).
+cache encryption (planned, section 12).
 
 ## 2. Dependencies and packaging
 
@@ -56,6 +56,8 @@ networked copies near players so that map objects can be climbed).
   through the normal network bubble and never spawn it themselves (except as a
   distant proxy, section 9.6).
 - **Local object**: spawned by the server and by every client with `ECE_LOCAL`.
+- **Promoted object**: a local object that the server has swapped for a networked copy because a player
+  is near it (section 13); it goes back to local when nobody needs it.
 - **Batch**: a group of up to `batchSize` objects close to each other. Unit of
   download, caching, hashing, spawning and unloading.
 - **Manifest**: per-server list of batches (bounds + hash) plus client settings.
@@ -124,6 +126,11 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
 | `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
 | `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
+| `networkRadius`, `vehicleRadius` | float, m | proximity networking: zone radius of a player on foot / in a slow vehicle (clamped 5..500) | 150 / 40 |
+| `maxFootSpeed`, `maxVehicleSpeed`, `maxHeight` | float | faster (m/s) or higher above ground (m): no zone | 6 / 8 / 20 |
+| `maxNetworked` | int | most objects networked by proximity at once (1..20000) | 6000 |
+| `proximityExclude` | array of name patterns | types never networked by proximity (no `@` tokens) | none |
+| `disableProximity` | bool | switch proximity networking off | on |
 
 **Every field is designed so that its zero value is the default.** Verified on 1.29:
 `JsonFileLoader<T>.LoadFile()` does not keep the class's initial values for fields
@@ -305,7 +312,13 @@ Every object is spawned on the server, local or networked:
   - networked: the same without `ECE_LOCAL`. `ECE_NOPERSISTENCY_WORLD` is
     required, otherwise the objects end up in the persistence and get duplicated
     on the next restart.
-- Model objects (`.p3d`): `CreateStaticObjectUsingP3D(path, pos, ori, scale, createLocal)`.
+- Model objects (`.p3d`): `CreateStaticObjectUsingP3D(path, pos, ori, scale, createLocal)` with the file's
+  position (the engine puts the model's base there) and orientation (radians), the scale as a creation
+  parameter. The server then rewrites the entry to the object's actual origin and yaw in degrees and marks
+  it `FLAG_ORIGIN`; clients and respawns place exactly there (13.10d). Class objects get `SetPosition`,
+  `SetOrientation` (degrees) and `SetScale` after creation.
+- After all maps are loaded, `ProcessMarkedObjectsForPathgraphUpdate()` is called once: `ECE_UPDATEPATHGRAPH`
+  only marks the objects, and zombies ignore them until the marks are processed (13.10).
 - A failed spawn (`NULL`) is logged once per type with the count, the object stays
   in the data (clients may have the content mod even if the server does not).
 
@@ -362,6 +375,8 @@ RPC ids: four consecutive ints starting at `0x445A4D01` (written as constants in
 | `MANIFEST` | server -> client | `DZOMS_Manifest` |
 | `REQUEST_BATCH` | client -> server | `int batchIndex` |
 | `BATCH` | server -> client | `DZOMS_Batch` |
+| `OBJECTS_NETWORKED` | server -> all clients | `DZOMS_IdList` (batch, index, network id of the copy), section 13.5 |
+| `OBJECTS_LOCAL` | server -> all clients | `DZOMS_IdList` (batch, index) |
 
 Payload classes contain only ints, floats, bools, strings, vectors and arrays of
 those. **No maps and no nested class instances**: `FileSerializer` does not restore
@@ -371,7 +386,7 @@ while flat arrays round-trip bit-exactly through `FileSerializer` and `ScriptRPC
 ```c
 class DZOMS_Manifest
 {
-    int protocolVersion;            // 1
+    int protocolVersion;            // 2 (the two object messages of section 13.5)
     float viewDistance;
     float proxyDistance;
     bool disableCache;
@@ -561,6 +576,11 @@ Server, headless, before every release:
 7. Client code compiles: build a test PBO with `#ifdef SERVER` / `#ifndef SERVER`
    swapped and boot it on the server.
 
+Proximity networking, headless (section 13.8): zone rules table, activation delay, cap, exclusion list,
+promotion and demotion order and budgets, create-before-delete, retry delays, protocol messages, client
+swap (scale, model twins, login, decoys), model placement. The real player states, the swap on a real
+client, climbing and the path graph need the in-game list of 13.8.
+
 Client, in game (cannot be automated):
 
 1. First join downloads closest-first, the area around the player is complete
@@ -692,12 +712,11 @@ Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
   an invalid one is reported.
 - Existing cache tests (truncated, wrong version, random, missing file) for version 2.
 
-## 13. Planned: proximity networking
+## 13. Proximity networking
 
-Not implemented yet; a design ready to be planned. It solves the climbing problem found in
-game (13.1) without networking the whole map: every map object stays a local object, and the
-server swaps in real networked objects only where a player can use them. It replaces the earlier
-idea of static models (13.1 explains why that failed).
+Implemented. Every map object stays a local object, and the server swaps in real networked copies where
+a player can use them, so that players can climb the objects (13.1). The sections below are the design and
+the findings from the in-game tests (13.10a to 13.10d) that shaped it. Admin documentation is in the README.
 
 ### 13.1 Problem and findings (2026-10-04, dedicated server + 1.29 client)
 
@@ -913,7 +932,7 @@ Client, in game (the debug logging build of 13.1 is the tool for the climb check
 - Login time and first-minute behaviour compared with the current release.
 - Zombies path around objects during swaps.
 
-### 13.9 Also found: model objects are misplaced by `CreateStaticObjectUsingP3D`
+### 13.9 Also found: model objects are misplaced by `CreateStaticObjectUsingP3D` (superseded by 13.10d)
 
 Measured on the headless server with the footprint of a downward ray scan: a model object
 created with `CreateStaticObjectUsingP3D(path, pos, ori, ...)` is not where its class twin is.
@@ -928,7 +947,7 @@ The `.p3d` entries the mod spawns today (server and client, 6.2 and 9.4) have th
 Editor shows where it placed them); then apply the same two calls at every
 `CreateStaticObjectUsingP3D` call of the mod, and to the networked copies of 13.4.
 
-### 13.10 Prototype first
+### 13.10 Prototype first (done: 13.10a to 13.10d)
 
 The design stands on three claims that need measuring before the full implementation:
 1. Promotion on a live server: the cost of creating and deleting networked objects at the
@@ -1021,7 +1040,7 @@ parameter), then **rewrites the entry to the object's actual origin and yaw in d
 (`DZOMS_Placement.Apply`), respawns on the server do the same, and a networked twin (created by the same
 call) already stands there. Batch data and hashes change once for maps with models.
 
-### 13.11 Changes
+### 13.11 Where it lives
 
 | Where | Change |
 |---|---|
@@ -1031,8 +1050,9 @@ call) already stands there. Batch data and hashes change once for maps with mode
 | `DZOMS_ClientWorld` | id set, no local spawn for announced ids, pending swaps, local respawn (13.5) |
 | `DZOMS_Config` | the fields of 13.7, normalization |
 | `MissionServer` hook (5_Mission) | `OnUpdate()` drives the timer |
-| spawning of model objects | `SetOrientation` + `SetPosition` after `CreateStaticObjectUsingP3D` (13.9) |
-| docs | DESIGN 3, 5, 6, 7, 9, 11 from this section; README (what "networked" means now, the new fields, why climbing needs it); `workshop.txt` |
+| `DZOMS_Placement`, `DZOMS_IdList` (3_Game) | one-step placement with `SetTransform` (13.10c); the id lists of 13.5 |
+| spawning of model objects | engine placement, entries rewritten to the origin with `FLAG_ORIGIN` (13.10d) |
+| docs | README (what "networked" means now, the new fields, why climbing needs it); `workshop.txt` |
 
 ## 14. Enforce Script pitfalls (verified on 1.29)
 
@@ -1083,7 +1103,11 @@ call) already stands there. Batch data and hashes change once for maps with mode
 | 4_World | `modded BuildingBase` | counts `AddAction()` calls into `m_DZOMS_ActionCount` |
 | 3_Game | `DZOMS_BatchBuilder` | cells and batches (6.3) |
 | 3_Game | `DZOMS_ServerWorld` | load maps, spawn, suppress, build batches, answer requests |
-| 3_Game | `DZOMS_ClientWorld` | download, cache use, batch states, spawning, proxies |
+| 3_Game | `DZOMS_ClientWorld` | download, cache use, batch states, spawning, proxies, swapping local copies for networked twins (scale, model placement) |
+| 3_Game | `DZOMS_Proximity`, `DZOMS_ProximityConfig`, `DZOMS_Zone`, `DZOMS_PlayerState` | zone rules, grid index, promotion and demotion queues, cap, report (section 13) |
+| 3_Game | `DZOMS_IdList` | object ids (batch, index, network id) of the two proximity messages |
+| 3_Game | `DZOMS_Placement` | position, orientation and scale in one step (`SetTransform`); model orientation in radians |
+| 5_Mission | `DZOMS_PlayerStates` | collects the player states (position, speed, vehicle, height) for the zone rules |
 | 3_Game | `modded DayZGame` | owns the server or client world, dispatches RPCs to it |
 | 5_Mission | `modded MissionServer` | create the server world in `OnInit` (with a `DZOMS_ObjectProbeWorld`), rate limit cleanup in `InvokeOnDisconnect` |
 | 5_Mission | `modded MissionGameplay` | create the client world in `OnInit`, update it in `OnUpdate`, destroy it in `OnMissionFinish` |
