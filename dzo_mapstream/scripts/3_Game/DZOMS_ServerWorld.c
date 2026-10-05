@@ -401,12 +401,19 @@ class DZOMS_ServerWorld
 	{
 		if (DZOMS_TypeName.IsModel(e.type))
 		{
-			Object model = g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, e.ori, e.scale, !networked);
-			if (model)
+			// as the map file gives it, the engine puts the model's base on the position and takes radians;
+			// an entry with FLAG_ORIGIN holds the object's origin (degrees) and is put there exactly. The
+			// scale is passed to the creation: SetOrientation would reset it.
+			bool origin = (e.flags & DZOMS_Batch.FLAG_ORIGIN) == DZOMS_Batch.FLAG_ORIGIN;
+			vector rawOri = e.ori;
+			if (origin)
 			{
-				// the engine centres the model's bounding box on the position and does not apply the
-				// orientation like SetOrientation does (DESIGN 13.9); SetOrientation would reset the scale
-				DZOMS_Placement.ApplyModel(model, e.pos, e.ori, e.scale);
+				rawOri = e.ori * Math.DEG2RAD;
+			}
+			Object model = g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, rawOri, e.scale, !networked);
+			if (model && origin)
+			{
+				DZOMS_Placement.Apply(model, e.pos, e.ori, e.scale);
 			}
 			return model;
 		}
@@ -675,11 +682,19 @@ class DZOMS_ServerWorld
 			bool isNetworked = SpawnEntry(e, rules, spawned, rule);
 			if (isNetworked)
 			{
-				e.flags = DZOMS_Batch.FLAG_NETWORKED;
+				e.flags = e.flags | DZOMS_Batch.FLAG_NETWORKED;
 			}
 			if (!spawned)
 			{
 				report.CountFailed(src.Type);
+			}
+			else if (DZOMS_TypeName.IsModel(e.type) && (e.flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+			{
+				// the Editor shows the object where the engine put it: that origin and its yaw in degrees
+				// are what the clients and later respawns use
+				e.pos = spawned.GetPosition();
+				e.ori = spawned.GetOrientation();
+				e.flags = e.flags | DZOMS_Batch.FLAG_ORIGIN;
 			}
 			report.CountObject(isNetworked, src.Type, rule);
 			m_Objects.Insert(e);

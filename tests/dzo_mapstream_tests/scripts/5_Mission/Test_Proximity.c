@@ -332,9 +332,12 @@ class DZOMS_Test_Proximity
 		// a networked model twin is created by the server's engine off its entry (bounding box centred,
 		// orientation not applied) and the position is not corrected on the client: the client puts it right
 		string modelPath = "dz\\structures\\industrial\\containers\\container_1bo.p3d";
-		array<ref DZOMS_ObjectEntry> ml = new array<ref DZOMS_ObjectEntry>();
 		vector mbase = base + "300 0 0";
-		ml.Insert(new DZOMS_ObjectEntry(modelPath, mbase, "0.7 0 0", 2, 0));
+		Object modelTwin = g_Game.CreateStaticObjectUsingP3D(modelPath, mbase, "0.7 0 0", 1, false);
+		vector twinOrigin = modelTwin.GetPosition();
+		vector twinOri = modelTwin.GetOrientation();
+		array<ref DZOMS_ObjectEntry> ml = new array<ref DZOMS_ObjectEntry>();
+		ml.Insert(new DZOMS_ObjectEntry(modelPath, twinOrigin, twinOri, 2, DZOMS_Batch.FLAG_ORIGIN));
 		array<ref DZOMS_Batch> msb = new array<ref DZOMS_Batch>();
 		array<float> mbo = new array<float>();
 		DZOMS_BatchBuilder.Build(ml, 400, msb, mbo);
@@ -349,15 +352,14 @@ class DZOMS_Test_Proximity
 		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
 		Object modelCopy = mw.GetClientBatch(0).objects.Get(0);
 		DZOMS_T.Check(modelCopy != null, "model entry: local copy exists");
-		Object modelTwin = g_Game.CreateStaticObjectUsingP3D(modelPath, mbase, "0.2 0 0", 2, false);
-		DZOMS_T.Check(vector.Distance(modelTwin.GetPosition(), mbase) > 0.5, "the raw model twin is off its entry (what the server's engine does)");
+		DZOMS_T.EqFloat(modelTwin.GetScale(), 1, "the model twin shows up unscaled (scale is not replicated)");
 		int mtLow, mtHigh;
 		modelTwin.GetNetworkID(mtLow, mtHigh);
 		mw.HandleNetworked(OneNet(0, 0, mtLow, mtHigh), DZOMS_Test_ClientSpawn.s_Time);
 		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
 		DZOMS_T.Check(mw.GetClientBatch(0).objects.Get(0) == null, "model entry: the local copy gave way to the twin");
-		DZOMS_T.EqFloat(vector.Distance(modelTwin.GetPosition(), mbase), 0, "model twin: put at the entry position");
-		DZOMS_T.EqFloat(modelTwin.GetOrientation()[0], 0.7 * Math.RAD2DEG, "model twin: yaw as in the entry (radians)");
+		DZOMS_T.EqFloat(vector.Distance(modelTwin.GetPosition(), twinOrigin), 0, "model twin stays at its origin");
+		DZOMS_T.EqFloat(modelTwin.GetOrientation()[0], twinOri[0], "model twin keeps its yaw");
 		DZOMS_T.EqFloat(modelTwin.GetScale(), 2, "model twin: scale as in the entry");
 		g_Game.ObjectDelete(modelTwin);
 		mw.Destroy();
@@ -733,36 +735,101 @@ class DZOMS_Test_Proximity
 		w.Destroy();
 	}
 
-	// model objects: the engine puts the bounding-box centre at the position and does not apply the
-	// orientation like SetOrientation (DESIGN 13.9); the server must end up where the entry says
+	// model objects. A model entry of a map file holds the position the Editor passed to
+	// CreateStaticObjectUsingP3D; the object's origin ends up elsewhere (bottom of its bounding box on
+	// that position, DESIGN 13.9) and the Editor shows that origin. Entries with FLAG_ORIGIN hold the
+	// origin and degrees (what the server rewrites them to after spawning); they are placed exactly.
 	static void RunModelPlacement()
 	{
 		array<string> models = {"dz\\plants_bliss\\bush\\b_caraganaarborescens_2s_summer.p3d", "dz\\plants_bliss\\clutter\\c_ferntall_summer.p3d", "dz\\structures\\industrial\\containers\\container_1bo.p3d"};
 		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -90";
 		for (int m = 0; m < models.Count(); m++)
 		{
-			for (int v = 0; v < 2; v++)
+			for (int v = 0; v < 4; v++)
 			{
-				vector pos = at + Vector(m * 30 + v * 12, 0, 0);
+				vector pos = at + Vector(m * 30 + v * 8, 0, 0);
 				float scale = 1;
 				if (m == 2)
 				{
 					scale = 2;
 				}
-				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "0.7 0 0", scale, 0);
-				Object o = DZOMS_ServerWorld.SpawnOnServer(e, v == 1);
-				string what = "model " + m.ToString() + " networked=" + (v == 1).ToString();
-				DZOMS_T.Check(o != null, what + ": created");
-				if (!o)
+				bool networked = v % 2 == 1;
+				string what = "model " + m.ToString() + " networked=" + networked.ToString();
+				Object o;
+				if (v < 2)
 				{
-					continue;
+					// as a map file gives it: radians, the position the engine puts the base on
+					what = what + " base entry";
+					o = DZOMS_ServerWorld.SpawnOnServer(new DZOMS_ObjectEntry(models.Get(m), pos, "0.7 0 0", scale, 0), networked);
+					DZOMS_T.Check(o != null, what + ": created");
+					if (o)
+					{
+						DZOMS_T.EqFloat(o.GetOrientation()[0], 0.7 * Math.RAD2DEG, what + ": yaw from radians");
+						DZOMS_T.EqFloat(o.GetScale(), scale, what + ": scale");
+					}
 				}
-				DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
-				DZOMS_T.EqFloat(o.GetOrientation()[0], 0.7 * Math.RAD2DEG, what + ": yaw as in the entry (model orientations are radians)");
-				DZOMS_T.EqFloat(o.GetScale(), scale, what + ": scale as in the entry (SetOrientation would reset it)");
-				g_Game.ObjectDelete(o);
+				else
+				{
+					what = what + " origin entry";
+					o = DZOMS_ServerWorld.SpawnOnServer(new DZOMS_ObjectEntry(models.Get(m), pos, "40 0 0", scale, DZOMS_Batch.FLAG_ORIGIN), networked);
+					DZOMS_T.Check(o != null, what + ": created");
+					if (o)
+					{
+						DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": exactly at the entry");
+						DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw in degrees");
+						DZOMS_T.EqFloat(o.GetScale(), scale, what + ": scale");
+					}
+				}
+				if (o)
+				{
+					g_Game.ObjectDelete(o);
+				}
 			}
 		}
+	}
+
+	// a map file with a model object: the server rewrites the entry to the origin the engine gave the object
+	static void RunModelEntries()
+	{
+		string mapsDir = DZOMS_T.DIR + "/DZE_prox_models";
+		MakeDirectory(DZOMS_T.DIR);
+		MakeDirectory(mapsDir);
+		string crate = "dz\\structures_bliss\\residential\\misc\\misc_woodencrate_3x.p3d";
+		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -70";
+		EditorSaveData data = new EditorSaveData();
+		DZOMS_TestFixtures.AddObject(data, crate, at, "0.314159 0 0", 1, 0);
+		DZOMS_TestFixtures.Save(data, mapsDir + "/models.dze");
+		DZOMS_Config c = new DZOMS_Config();
+		c.maps = new array<ref DZOMS_MapEntry>();
+		DZOMS_MapEntry me = new DZOMS_MapEntry();
+		me.file = "models.dze";
+		c.maps.Insert(me);
+		c.Normalize();
+		DZOMS_ServerWorld w = new DZOMS_ServerWorld(c, mapsDir, new DZOMS_ObjectProbe());
+		w.m_Offline = true;
+		w.Load();
+		DZOMS_T.EqInt(w.GetObjectCount(), 1, "model map: one object");
+		if (w.GetObjectCount() == 1 && w.GetSpawned().Get(0))
+		{
+			DZOMS_ObjectEntry e = w.GetObjects().Get(0);
+			Object o = w.GetSpawned().Get(0);
+			DZOMS_T.Check((e.flags & DZOMS_Batch.FLAG_ORIGIN) == DZOMS_Batch.FLAG_ORIGIN, "model entry is marked as origin data");
+			DZOMS_T.EqFloat(vector.Distance(e.pos, o.GetPosition()), 0, "model entry holds the object's origin");
+			DZOMS_T.EqFloat(e.ori[0], 18, "model entry holds the yaw in degrees");
+			DZOMS_T.Check(vector.Distance(e.pos, at) > 0.1, "the origin is not the file's position (the engine puts the base there)");
+			DZOMS_Batch b = w.GetBatches().Get(0);
+			DZOMS_T.Check(b.flags.Get(0) == DZOMS_Batch.FLAG_ORIGIN, "the batch carries the origin flag");
+			// the client places the local copy at that origin
+			Object copy = DZOMS_ClientWorld.SpawnLocal(b.GetType(0), b.positions.Get(0), b.orientations.Get(0), b.scales.Get(0), b.flags.Get(0));
+			DZOMS_T.Check(copy != null, "client copy created");
+			if (copy)
+			{
+				DZOMS_T.EqFloat(vector.Distance(copy.GetPosition(), o.GetPosition()), 0, "client copy at the server object's origin");
+				DZOMS_T.EqFloat(copy.GetOrientation()[0], 18, "client copy yaw");
+				g_Game.ObjectDelete(copy);
+			}
+		}
+		w.Destroy();
 	}
 
 	// the client's local model objects land where the entry says, too
@@ -773,7 +840,7 @@ class DZOMS_Test_Proximity
 		for (int m = 0; m < models.Count(); m++)
 		{
 			vector pos = at + Vector(m * 30, 0, 0);
-			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "0.7 0 0", 2);
+			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "40 0 0", 2, DZOMS_Batch.FLAG_ORIGIN);
 			string what = "client model " + m.ToString();
 			DZOMS_T.Check(o != null, what + ": created");
 			if (!o)
@@ -781,7 +848,7 @@ class DZOMS_Test_Proximity
 				continue;
 			}
 			DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
-			DZOMS_T.EqFloat(o.GetOrientation()[0], 0.7 * Math.RAD2DEG, what + ": yaw as in the entry (model orientations are radians)");
+			DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw in degrees");
 			DZOMS_T.EqFloat(o.GetScale(), 2, what + ": scale as in the entry");
 			g_Game.ObjectDelete(o);
 		}
@@ -806,7 +873,7 @@ class DZOMS_Test_Proximity
 			}
 			if (v == 2)
 			{
-				o = DZOMS_ClientWorld.SpawnLocal("Land_Container_1Bo", pos, "40 0 0", 2);
+				o = DZOMS_ClientWorld.SpawnLocal("Land_Container_1Bo", pos, "40 0 0", 2, 0);
 			}
 			DZOMS_T.Check(o != null, what + ": created");
 			if (!o)
@@ -826,6 +893,7 @@ class DZOMS_Test_Proximity
 		RunClientModelPlacement();
 		RunClassPlacement();
 		RunModelPlacement();
+		RunModelEntries();
 		RunDisabled();
 		RunPathgraphRegions();
 		RunKeepLocal();

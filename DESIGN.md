@@ -1008,6 +1008,19 @@ Build `da91b22`: every living player on foot, radius 40 m, no config.
   log); the client puts the twin at the entry (position, yaw, scale). The client's own engine creates local
   models at the entry within 2 cm, so the entry is the origin.
 
+### 13.10d Model positions: the Editor shows the origin the engine gave (2026-10-05)
+
+In the Editor the crate `misc_woodencrate_3x` shows `6906.566 266.867 9901.654`, orientation 18; the file
+holds `6906.512 266.159 9901.661`, yaw 0.314 rad. `CreateStaticObjectUsingP3D` puts the model's **base** on
+the position it is given (the origin ends up 0.7 m higher for the crate, 1.2 m for a container) and takes
+radians; the Editor shows the resulting origin. So the position in the file is not the origin, and
+placing the origin at the file's position (builds 4 to 10) sank models.
+Rule now: the server creates a model as the file says (the engine's own placement, scale as a creation
+parameter), then **rewrites the entry to the object's actual origin and yaw in degrees** and marks it
+`FLAG_ORIGIN` (data entry flag 2). Clients place their local copy at that origin exactly
+(`DZOMS_Placement.Apply`), respawns on the server do the same, and a networked twin (created by the same
+call) already stands there. Batch data and hashes change once for maps with models.
+
 ### 13.11 Changes
 
 | Where | Change |

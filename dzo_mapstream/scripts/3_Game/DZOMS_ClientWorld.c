@@ -363,17 +363,20 @@ class DZOMS_ClientWorld
 	}
 
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
-	static Object SpawnLocal(string type, vector pos, vector ori, float scale)
+	static Object SpawnLocal(string type, vector pos, vector ori, float scale, int flags)
 	{
 		if (DZOMS_TypeName.IsModel(type))
 		{
-			Object model = g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			if ((flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+			{
+				return g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			}
+			// origin data from the server: the object stands exactly where the server's object stands
+			Object model = g_Game.CreateStaticObjectUsingP3D(type, pos, ori * Math.DEG2RAD, scale, true);
 			if (model)
 			{
-				// the engine centres the model's bounding box on the position and does not apply the
-				// orientation like SetOrientation does (DESIGN 13.9): put it where the entry says, keeping the scale
 				LogModelPlacement(type, model, pos, ori);
-				DZOMS_Placement.ApplyModel(model, pos, ori, scale);
+				DZOMS_Placement.Apply(model, pos, ori, scale);
 			}
 			return model;
 		}
@@ -510,7 +513,7 @@ class DZOMS_ClientWorld
 					continue;
 				}
 				budget--;
-				Object o = SpawnLocal(type, cb.data.positions.Get(i), cb.data.orientations.Get(i), cb.data.scales.Get(i));
+				Object o = SpawnLocal(type, cb.data.positions.Get(i), cb.data.orientations.Get(i), cb.data.scales.Get(i), cb.data.flags.Get(i));
 				if (o)
 				{
 					cb.objects.Set(i, o);
@@ -621,7 +624,7 @@ class DZOMS_ClientWorld
 		{
 			if (d > proxyDistance + PROXY_HYSTERESIS && !m_FailedTypes.Contains(type) && !NetworkedInstancePresent(type, pos, null))
 			{
-				Object created = SpawnLocal(type, pos, cb.data.orientations.Get(entry), cb.data.scales.Get(entry));
+				Object created = SpawnLocal(type, pos, cb.data.orientations.Get(entry), cb.data.scales.Get(entry), cb.data.flags.Get(entry));
 				if (created)
 				{
 					cb.proxies.Set(entry, created);
@@ -982,7 +985,7 @@ class DZOMS_ClientWorld
 			string want = DZOMS_TypeName.Of(type);
 			if (DZOMS_TypeName.Of(twin.GetType()) == want || DZOMS_TypeName.Of(twin.GetShapeName()) == want)
 			{
-				FixTwin(twin, type, cb.data.positions.Get(index), cb.data.orientations.Get(index), scale);
+				FixTwin(twin, type, cb.data.positions.Get(index), cb.data.orientations.Get(index), scale, cb.data.flags.Get(index));
 			}
 		}
 	}
@@ -1010,7 +1013,7 @@ class DZOMS_ClientWorld
 			{
 				continue;
 			}
-			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), copy))
+			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), cb.data.flags.Get(index), copy))
 			{
 				g_Game.ObjectDelete(copy);
 				cb.objects.Set(index, null);
@@ -1031,7 +1034,7 @@ class DZOMS_ClientWorld
 
 	// the announced twin: the object with that network id, of the entry's type, at the entry's position.
 	// Not a search by type and position: a hidden world object at the same place would pass that.
-	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, float scale, Object copy)
+	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, float scale, int flags, Object copy)
 	{
 		Object twin = g_Game.GetObjectByNetworkId(low, high);
 		if (!twin || twin == copy)
@@ -1043,7 +1046,7 @@ class DZOMS_ClientWorld
 		{
 			return false;
 		}
-		if (FixTwin(twin, type, pos, ori, scale))
+		if (FixTwin(twin, type, pos, ori, scale, flags))
 		{
 			return true;
 		}
@@ -1073,11 +1076,15 @@ class DZOMS_ClientWorld
 	// replicated at all, and a model object (CreateStaticObjectUsingP3D) is created off its entry by the
 	// server's engine (found in game: 0.1 to 10 m). The client puts the twin where and as big as the entry
 	// says; the server's collision is at the entry already. True when the twin matches the entry.
-	protected bool FixTwin(Object twin, string type, vector pos, vector ori, float scale)
+	protected bool FixTwin(Object twin, string type, vector pos, vector ori, float scale, int flags)
 	{
 		bool model = DZOMS_TypeName.IsModel(type);
 		float off = vector.Distance(twin.GetPosition(), pos);
-		vector wantOri = DZOMS_Placement.ModelOrientation(ori);
+		vector wantOri = ori;
+		if (model && (flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+		{
+			wantOri = DZOMS_Placement.ModelOrientation(ori);
+		}
 		float yawOff = Math.AbsFloat(twin.GetOrientation()[0] - wantOri[0]);
 		if (yawOff > 180)
 		{
@@ -1121,7 +1128,7 @@ class DZOMS_ClientWorld
 				continue;
 			}
 			budget--;
-			Object o = SpawnLocal(type, cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index));
+			Object o = SpawnLocal(type, cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), cb.data.flags.Get(index));
 			if (o)
 			{
 				cb.objects.Set(index, o);

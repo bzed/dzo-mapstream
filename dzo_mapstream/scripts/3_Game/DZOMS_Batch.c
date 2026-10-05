@@ -2,6 +2,10 @@
 class DZOMS_Batch
 {
 	const int FLAG_NETWORKED = 1;
+	// model entries: the position is the object's origin and the orientation is in degrees (the server
+	// rewrites a model entry to the origin the engine gave the object, DESIGN 13.9). Without it the entry
+	// is as a map file gives it: the position the engine puts the model's base on, radians.
+	const int FLAG_ORIGIN = 2;
 
 	int index;
 	ref array<string> types;
