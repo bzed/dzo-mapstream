@@ -268,6 +268,36 @@ class DZOMS_Test_Proximity
 		w.HandleLocal(One(nearIndex, 1), DZOMS_Test_ClientSpawn.s_Time);
 		g_Game.ObjectDelete(off);
 
+		// a twin with another scale than its entry does not replace the local copy
+		array<ref DZOMS_ObjectEntry> sl = new array<ref DZOMS_ObjectEntry>();
+		vector sbase = base + "100 0 0";
+		sl.Insert(new DZOMS_ObjectEntry("Apple", sbase, "0 0 0", 2, 0));
+		array<ref DZOMS_Batch> ssb = new array<ref DZOMS_Batch>();
+		array<float> sbo = new array<float>();
+		DZOMS_BatchBuilder.Build(sl, 400, ssb, sbo);
+		DZOMS_ClientWorld sw = new DZOMS_ClientWorld("");
+		sw.m_Offline = true;
+		sw.Update(sbase, DZOMS_Test_ClientSpawn.s_Time, true);
+		sw.HandleManifest(DZOMS_Test_ClientDownload.MakeManifest(ssb, sbo, true), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Batch sc = DZOMS_Test_ClientDownload.Clone(ssb.Get(0));
+		sc.index = 0;
+		sw.HandleBatch(sc, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
+		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
+		Object scaledCopy = sw.GetClientBatch(0).objects.Get(0);
+		Object scaledTwin = g_Game.CreateObjectEx("Apple", sbase, ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		int stLow, stHigh;
+		scaledTwin.GetNetworkID(stLow, stHigh);
+		sw.HandleNetworked(OneNet(0, 0, stLow, stHigh), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
+		DZOMS_T.Check(sw.GetClientBatch(0).objects.Get(0) == scaledCopy, "a twin with scale 1 does not replace a scale 2 entry");
+		DZOMS_T.Check(sw.GetScaleMismatchCount() >= 1, "the scale mismatch is counted");
+		scaledTwin.SetScale(2);
+		DZOMS_Test_ClientSpawn.Frame(sw, sbase, 16);
+		DZOMS_T.Check(sw.GetClientBatch(0).objects.Get(0) == null, "a twin with the entry's scale takes over");
+		g_Game.ObjectDelete(scaledTwin);
+		sw.Destroy();
+
 		// announced without a networked instance: after the timeout the local copy stays
 		Object copy4 = b0.objects.Get(4);
 		w.HandleNetworked(OneNet(nearIndex, 4, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
@@ -650,7 +680,12 @@ class DZOMS_Test_Proximity
 			for (int v = 0; v < 2; v++)
 			{
 				vector pos = at + Vector(m * 30 + v * 12, 0, 0);
-				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "40 0 0", 1, 0);
+				float scale = 1;
+				if (m == 2)
+				{
+					scale = 2;
+				}
+				DZOMS_ObjectEntry e = new DZOMS_ObjectEntry(models.Get(m), pos, "40 0 0", scale, 0);
 				Object o = DZOMS_ServerWorld.SpawnOnServer(e, v == 1);
 				string what = "model " + m.ToString() + " networked=" + (v == 1).ToString();
 				DZOMS_T.Check(o != null, what + ": created");
@@ -660,6 +695,7 @@ class DZOMS_Test_Proximity
 				}
 				DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
 				DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+				DZOMS_T.EqFloat(o.GetScale(), scale, what + ": scale as in the entry (SetOrientation would reset it)");
 				g_Game.ObjectDelete(o);
 			}
 		}
@@ -673,7 +709,7 @@ class DZOMS_Test_Proximity
 		for (int m = 0; m < models.Count(); m++)
 		{
 			vector pos = at + Vector(m * 30, 0, 0);
-			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "40 0 0", 1);
+			Object o = DZOMS_ClientWorld.SpawnLocal(models.Get(m), pos, "40 0 0", 2);
 			string what = "client model " + m.ToString();
 			DZOMS_T.Check(o != null, what + ": created");
 			if (!o)
@@ -682,6 +718,40 @@ class DZOMS_Test_Proximity
 			}
 			DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": at the entry position");
 			DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw as in the entry");
+			DZOMS_T.EqFloat(o.GetScale(), 2, what + ": scale as in the entry");
+			g_Game.ObjectDelete(o);
+		}
+	}
+
+	// scaled class objects keep position, yaw and scale (server and client)
+	static void RunClassPlacement()
+	{
+		vector at = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -30";
+		for (int v = 0; v < 3; v++)
+		{
+			vector pos = at + Vector(v * 30, 0, 0);
+			Object o;
+			string what = "class placement " + v.ToString();
+			if (v == 0)
+			{
+				o = DZOMS_ServerWorld.SpawnOnServer(new DZOMS_ObjectEntry("Land_Container_1Bo", pos, "40 0 0", 2, 0), false);
+			}
+			if (v == 1)
+			{
+				o = DZOMS_ServerWorld.SpawnOnServer(new DZOMS_ObjectEntry("Land_Container_1Bo", pos, "40 0 0", 2, 0), true);
+			}
+			if (v == 2)
+			{
+				o = DZOMS_ClientWorld.SpawnLocal("Land_Container_1Bo", pos, "40 0 0", 2);
+			}
+			DZOMS_T.Check(o != null, what + ": created");
+			if (!o)
+			{
+				continue;
+			}
+			DZOMS_T.EqFloat(vector.Distance(o.GetPosition(), pos), 0, what + ": position");
+			DZOMS_T.EqFloat(o.GetOrientation()[0], 40, what + ": yaw");
+			DZOMS_T.EqFloat(o.GetScale(), 2, what + ": scale");
 			g_Game.ObjectDelete(o);
 		}
 	}
@@ -690,6 +760,7 @@ class DZOMS_Test_Proximity
 	{
 		DZOMS_T.Suite("proximity");
 		RunClientModelPlacement();
+		RunClassPlacement();
 		RunModelPlacement();
 		RunDisabled();
 		RunPathgraphRegions();

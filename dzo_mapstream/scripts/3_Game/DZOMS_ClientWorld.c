@@ -73,6 +73,7 @@ class DZOMS_ClientWorld
 	protected int m_SwapTimeouts;
 	protected int m_SwapsDone;
 	protected int m_TwinMismatch;
+	protected int m_ScaleMismatch;
 	protected ref map<string, int> m_TwinLogged = new map<string, int>();
 	protected int m_AnnounceDropped;
 
@@ -278,7 +279,7 @@ class DZOMS_ClientWorld
 			}
 		}
 		DZOMS_Log.Info("status: camera " + m_Camera.ToString() + ", " + received.ToString() + "/" + m_Batches.Count().ToString() + " batches received, nearest " + Math.Round(nearest).ToString() + " m away (view distance " + Math.Round(m_Manifest.viewDistance).ToString() + " m), " + loaded.ToString() + " loaded, " + objects.ToString() + " local objects alive");
-		DZOMS_Log.Info("swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_TwinMismatch.ToString() + " displaced twins, " + m_NetworkedIds.Count().ToString() + " announced");
+		DZOMS_Log.Info("swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_TwinMismatch.ToString() + " displaced twins, " + m_ScaleMismatch.ToString() + " scale mismatches, " + m_NetworkedIds.Count().ToString() + " announced");
 	}
 
 	bool IsFailedType(string type)
@@ -357,10 +358,9 @@ class DZOMS_ClientWorld
 			if (model)
 			{
 				// the engine centres the model's bounding box on the position and does not apply the
-				// orientation like SetOrientation does (DESIGN 13.9): put it where the entry says
+				// orientation like SetOrientation does (DESIGN 13.9): put it where the entry says, keeping the scale
 				LogModelPlacement(type, model, pos, ori);
-				model.SetOrientation(ori);
-				model.SetPosition(pos);
+				DZOMS_Placement.Apply(model, pos, ori, scale);
 			}
 			return model;
 		}
@@ -787,6 +787,12 @@ class DZOMS_ClientWorld
 		return m_TwinMismatch;
 	}
 
+	// twins that exist at the right place but with another scale than their entry
+	int GetScaleMismatchCount()
+	{
+		return m_ScaleMismatch;
+	}
+
 	int GetSwapTimeoutCount()
 	{
 		return m_SwapTimeouts;
@@ -923,7 +929,7 @@ class DZOMS_ClientWorld
 			{
 				continue;
 			}
-			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), copy))
+			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), copy))
 			{
 				g_Game.ObjectDelete(copy);
 				cb.objects.Set(index, null);
@@ -944,7 +950,7 @@ class DZOMS_ClientWorld
 
 	// the announced twin: the object with that network id, of the entry's type, at the entry's position.
 	// Not a search by type and position: a hidden world object at the same place would pass that.
-	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, Object copy)
+	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, float scale, Object copy)
 	{
 		Object twin = g_Game.GetObjectByNetworkId(low, high);
 		if (!twin || twin == copy)
@@ -967,6 +973,20 @@ class DZOMS_ClientWorld
 				m_TwinLogged.Set(type, logged + 1);
 				DZOMS_Log.Warn("swap: twin of " + type + " is " + off.ToString() + " m from its entry, twin " + twin.GetPosition().ToString());
 				DZOMS_Log.Warn("swap: entry " + pos.ToString() + " ori " + ori.ToString() + ", twin ori " + twin.GetOrientation().ToString());
+			}
+			return false;
+		}
+		// the twin must have the entry's scale, or the local copy (which has it) stays: found in game
+		// with a scale 2 pier that changed place when its networked copy took over
+		if (Math.AbsFloat(twin.GetScale() - scale) > 0.01)
+		{
+			m_ScaleMismatch++;
+			int scaleLogged = 0;
+			m_TwinLogged.Find(type + "#scale", scaleLogged);
+			if (scaleLogged < 3)
+			{
+				m_TwinLogged.Set(type + "#scale", scaleLogged + 1);
+				DZOMS_Log.Warn("swap: twin of " + type + " has scale " + twin.GetScale().ToString() + ", the entry " + scale.ToString());
 			}
 			return false;
 		}
