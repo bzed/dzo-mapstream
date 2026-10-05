@@ -296,6 +296,72 @@ class DZOMS_Test_Proximity
 		g_Game.ObjectDelete(scaledTwin);
 		sw.Destroy();
 
+		// login in an area whose objects are networked already: announced before the batch spawns, no
+		// local copy exists, and the twin that streams in still gets its scale (and keeps it)
+		array<ref DZOMS_ObjectEntry> ll = new array<ref DZOMS_ObjectEntry>();
+		vector lbase = base + "200 0 0";
+		ll.Insert(new DZOMS_ObjectEntry("Apple", lbase, "0 0 0", 2, 0));
+		array<ref DZOMS_Batch> lsb = new array<ref DZOMS_Batch>();
+		array<float> lbo = new array<float>();
+		DZOMS_BatchBuilder.Build(ll, 400, lsb, lbo);
+		DZOMS_ClientWorld lw = new DZOMS_ClientWorld("");
+		lw.m_Offline = true;
+		lw.Update(lbase, DZOMS_Test_ClientSpawn.s_Time, true);
+		lw.HandleManifest(DZOMS_Test_ClientDownload.MakeManifest(lsb, lbo, true), DZOMS_Test_ClientSpawn.s_Time);
+		Object loginTwin = g_Game.CreateObjectEx("Apple", lbase, ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		int ltLow, ltHigh;
+		loginTwin.GetNetworkID(ltLow, ltHigh);
+		lw.HandleNetworked(OneNet(0, 0, ltLow, ltHigh), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Batch lc = DZOMS_Test_ClientDownload.Clone(lsb.Get(0));
+		lc.index = 0;
+		lw.HandleBatch(lc, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(lw, lbase, 16);
+		DZOMS_Test_ClientSpawn.Frame(lw, lbase, 16);
+		DZOMS_T.Check(lw.GetClientBatch(0).objects.Get(0) == null, "login: no local copy of an announced entry");
+		DZOMS_T.EqFloat(loginTwin.GetScale(), 2, "login: the streamed twin got the entry's scale");
+		loginTwin.SetScale(1);
+		DZOMS_Test_ClientSpawn.Frame(lw, lbase, 3000);
+		DZOMS_T.EqFloat(loginTwin.GetScale(), 2, "login: a twin that lost its scale gets it again");
+		lw.HandleLocal(One(0, 0), DZOMS_Test_ClientSpawn.s_Time);
+		loginTwin.SetScale(1);
+		DZOMS_Test_ClientSpawn.Frame(lw, lbase, 3000);
+		DZOMS_T.EqFloat(loginTwin.GetScale(), 1, "an entry that is local again is no longer watched");
+		g_Game.ObjectDelete(loginTwin);
+		lw.Destroy();
+
+		// a networked model twin is created by the server's engine off its entry (bounding box centred,
+		// orientation not applied) and the position is not corrected on the client: the client puts it right
+		string modelPath = "dz\\structures\\industrial\\containers\\container_1bo.p3d";
+		array<ref DZOMS_ObjectEntry> ml = new array<ref DZOMS_ObjectEntry>();
+		vector mbase = base + "300 0 0";
+		ml.Insert(new DZOMS_ObjectEntry(modelPath, mbase, "40 0 0", 2, 0));
+		array<ref DZOMS_Batch> msb = new array<ref DZOMS_Batch>();
+		array<float> mbo = new array<float>();
+		DZOMS_BatchBuilder.Build(ml, 400, msb, mbo);
+		DZOMS_ClientWorld mw = new DZOMS_ClientWorld("");
+		mw.m_Offline = true;
+		mw.Update(mbase, DZOMS_Test_ClientSpawn.s_Time, true);
+		mw.HandleManifest(DZOMS_Test_ClientDownload.MakeManifest(msb, mbo, true), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Batch mc = DZOMS_Test_ClientDownload.Clone(msb.Get(0));
+		mc.index = 0;
+		mw.HandleBatch(mc, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
+		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
+		Object modelCopy = mw.GetClientBatch(0).objects.Get(0);
+		DZOMS_T.Check(modelCopy != null, "model entry: local copy exists");
+		Object modelTwin = g_Game.CreateStaticObjectUsingP3D(modelPath, mbase, "40 0 0", 2, false);
+		DZOMS_T.Check(vector.Distance(modelTwin.GetPosition(), mbase) > 0.5, "the raw model twin is off its entry (what the server's engine does)");
+		int mtLow, mtHigh;
+		modelTwin.GetNetworkID(mtLow, mtHigh);
+		mw.HandleNetworked(OneNet(0, 0, mtLow, mtHigh), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(mw, mbase, 16);
+		DZOMS_T.Check(mw.GetClientBatch(0).objects.Get(0) == null, "model entry: the local copy gave way to the twin");
+		DZOMS_T.EqFloat(vector.Distance(modelTwin.GetPosition(), mbase), 0, "model twin: put at the entry position");
+		DZOMS_T.EqFloat(modelTwin.GetOrientation()[0], 40, "model twin: yaw as in the entry");
+		DZOMS_T.EqFloat(modelTwin.GetScale(), 2, "model twin: scale as in the entry");
+		g_Game.ObjectDelete(modelTwin);
+		mw.Destroy();
+
 		// announced without a networked instance: after the timeout the local copy stays
 		Object copy4 = b0.objects.Get(4);
 		w.HandleNetworked(OneNet(nearIndex, 4, 7000, 0), DZOMS_Test_ClientSpawn.s_Time);
