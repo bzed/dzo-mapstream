@@ -510,7 +510,7 @@ class DZOMS_Test_Proximity
 	static void RunPromotion()
 	{
 		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -250";
-		float r = DZOMS_Proximity.NETWORK_RADIUS;
+		float r = DZOMS_Config.DEFAULT_NETWORK_RADIUS;
 		string mapsDir = DZOMS_T.DIR + "/DZE_prox_promo";
 		MakeDirectory(DZOMS_T.DIR);
 		MakeDirectory(mapsDir);
@@ -547,6 +547,7 @@ class DZOMS_Test_Proximity
 
 		DZOMS_Proximity prox = new DZOMS_Proximity();
 		prox.Init(w);
+		prox.m_ActivateDelayMs = 0;
 		DZOMS_PlayerState a = Player(1, base, false);
 
 		// a dead player has no zone
@@ -663,12 +664,23 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(nets, 1, "failed local respawn: and it is networked");
 		DZOMS_T.EqInt(w.GetPromotedCount(), 1, "failed local respawn: the others were released");
 		DZOMS_T.Check(prox.GetFailures() >= 1, "failed local respawn is counted");
+		int failuresBefore = prox.GetFailures();
+		prox.Update(Players(a, b), 98000);
+		prox.ProcessQueue(98000);
+		DZOMS_T.EqInt(prox.GetFailures(), failuresBefore, "failed local respawn: not retried within a minute");
+		DZOMS_T.Check(w.IsPromoted(3), "failed local respawn: still promoted after the next update");
+		prox.Update(Players(a, b), 158000);
+		prox.ProcessQueue(158000);
+		DZOMS_T.EqInt(prox.GetFailures(), failuresBefore + 1, "failed local respawn: retried after a minute");
 
 		// the status line: short, only when something happened, not twice within 10 s
 		string line = prox.StatusLine(100000);
 		DZOMS_T.Check(line != "" && line.Length() < 200, "status line after activity, short: " + line);
 		DZOMS_T.Eq(prox.StatusLine(100001), "", "no second status line within 10 s");
-		DZOMS_T.Eq(prox.StatusLine(120000), "", "no status line without activity");
+		DZOMS_T.Eq(prox.StatusLine(130000), "", "no status line before a minute has passed");
+		DZOMS_T.Eq(prox.StatusLine(170000), "", "no status line without activity");
+		array<string> typeLines = prox.TypeReport(5);
+		DZOMS_T.Check(typeLines.Count() >= 1 && typeLines.Get(0).Contains("apple") && typeLines.Get(0).Length() < 200, "type report names the promoted types");
 
 		// promotion and demotion do not touch the data
 		DZOMS_T.Eq(w.GetDigest(), digest, "digest unchanged");
@@ -678,6 +690,162 @@ class DZOMS_Test_Proximity
 			hashesAfter += w.GetManifest().hashes.Get(k);
 		}
 		DZOMS_T.Eq(hashesAfter, hashes, "batch hashes unchanged");
+		w.Destroy();
+	}
+
+	static DZOMS_PlayerState StateOf(int id, vector pos, float speed, bool vehicle, float height)
+	{
+		DZOMS_PlayerState p = new DZOMS_PlayerState();
+		p.id = id;
+		p.pos = pos;
+		p.speed = speed;
+		p.inVehicle = vehicle;
+		p.height = height;
+		p.alive = true;
+		return p;
+	}
+
+	// zone rules of DESIGN 13.3
+	static void RunZoneRules()
+	{
+		DZOMS_ProximityConfig cfg = new DZOMS_ProximityConfig();
+		cfg.networkRadius = 150;
+		cfg.vehicleRadius = 40;
+		cfg.maxFootSpeed = 6;
+		cfg.maxVehicleSpeed = 8;
+		cfg.maxHeight = 20;
+		cfg.maxNetworked = 6000;
+		DZOMS_Zone z;
+
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 1.5, false, 0), cfg);
+		DZOMS_T.Check(z.active && z.radius == 150, "walking: zone of networkRadius");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 5, false, 0), cfg);
+		DZOMS_T.Check(z.active, "jogging at 5 m/s: zone");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 6.1, false, 0), cfg);
+		DZOMS_T.Check(!z.active, "faster than maxFootSpeed: no zone");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 2, true, 0), cfg);
+		DZOMS_T.Check(z.active && z.radius == 40, "slow vehicle: zone of vehicleRadius");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 8.1, true, 0), cfg);
+		DZOMS_T.Check(!z.active, "faster than maxVehicleSpeed: no zone");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 3, true, 50), cfg);
+		DZOMS_T.Check(!z.active, "helicopter 50 m up: no zone whatever the speed");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 3, true, 15), cfg);
+		DZOMS_T.Check(z.active && z.radius == 40, "slow vehicle 15 m up: zone");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 1, false, 19), cfg);
+		DZOMS_T.Check(z.active, "on foot 19 m above the ground (a roof): zone");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 1, false, 21), cfg);
+		DZOMS_T.Check(!z.active, "on foot 21 m above the ground: no zone");
+		DZOMS_PlayerState dead = StateOf(1, "0 0 0", 0, false, 0);
+		dead.alive = false;
+		z = DZOMS_Proximity.ZoneFor(dead, cfg);
+		DZOMS_T.Check(!z.active, "dead: no zone");
+		cfg.networkRadius = 80;
+		cfg.maxFootSpeed = 3;
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 4, false, 0), cfg);
+		DZOMS_T.Check(!z.active, "custom maxFootSpeed");
+		z = DZOMS_Proximity.ZoneFor(StateOf(1, "0 0 0", 2, false, 0), cfg);
+		DZOMS_T.Check(z.active && z.radius == 80, "custom networkRadius");
+	}
+
+	// fast movers, vehicles, the activation delay, the exclusion list and the cap, on a real world
+	static void RunProximityRules()
+	{
+		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -350";
+		DZOMS_ServerWorld w = MakeWorld("prox_rules", 10, base);
+		DZOMS_Proximity prox = new DZOMS_Proximity();
+		prox.Init(w);
+		DZOMS_ProximityConfig cfg = prox.GetConfig();
+		cfg.networkRadius = 50;
+		cfg.vehicleRadius = 20;
+
+		// a runner and a helicopter promote nothing
+		prox.m_ActivateDelayMs = 0;
+		prox.Update(Players(StateOf(1, base, 9, false, 0), null), 0);
+		prox.ProcessQueue(0);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "a runner promotes nothing");
+		prox.Update(Players(StateOf(1, base, 2, true, 80), null), 1000);
+		prox.ProcessQueue(1000);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "a helicopter promotes nothing");
+		prox.Update(Players(StateOf(1, base, 12, true, 0), null), 2000);
+		prox.ProcessQueue(2000);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 0, "a fast car promotes nothing");
+
+		// a slow vehicle: the smaller zone (objects every 10 m at x = 0..90)
+		prox.Update(Players(StateOf(1, base, 2, true, 0), null), 3000);
+		prox.ProcessQueue(3000);
+		prox.ProcessQueue(3001);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 3, "slow vehicle: objects within 20 m (x = 0, 10, 20)");
+
+		// on foot: the larger zone
+		prox.Update(Players(StateOf(1, base, 1, false, 0), null), 4000);
+		prox.ProcessQueue(4000);
+		prox.ProcessQueue(4001);
+		DZOMS_T.EqInt(w.GetPromotedCount(), 6, "on foot: objects within 50 m (x = 0 .. 50)");
+
+		// the activation delay: 2 s of qualifying before the zone opens
+		DZOMS_ServerWorld w2 = MakeWorld("prox_delay", 4, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -420");
+		DZOMS_Proximity delayed = new DZOMS_Proximity();
+		delayed.Init(w2);
+		vector base2 = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -420";
+		delayed.Update(Players(StateOf(7, base2, 1, false, 0), null), 0);
+		delayed.ProcessQueue(0);
+		DZOMS_T.EqInt(w2.GetPromotedCount(), 0, "delay: nothing at the first sight of the player");
+		delayed.Update(Players(StateOf(7, base2, 1, false, 0), null), 1000);
+		delayed.ProcessQueue(1000);
+		DZOMS_T.EqInt(w2.GetPromotedCount(), 0, "delay: nothing after 1 s");
+		delayed.Update(Players(StateOf(7, base2, 8, false, 0), null), 2000);
+		delayed.Update(Players(StateOf(7, base2, 1, false, 0), null), 3000);
+		delayed.ProcessQueue(3000);
+		DZOMS_T.EqInt(w2.GetPromotedCount(), 0, "delay: a player who ran in between starts again");
+		delayed.Update(Players(StateOf(7, base2, 1, false, 0), null), 5000);
+		delayed.ProcessQueue(5000);
+		DZOMS_T.Check(w2.GetPromotedCount() > 0, "delay: promoted after 2 s of qualifying");
+		w2.Destroy();
+
+		// cap: 10 candidates around the player, room for 4
+		DZOMS_ServerWorld w3 = MakeWorld("prox_cap", 10, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -490");
+		vector base3 = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -490";
+		DZOMS_Proximity capped = new DZOMS_Proximity();
+		capped.Init(w3);
+		capped.m_ActivateDelayMs = 0;
+		capped.GetConfig().maxNetworked = 4;
+		capped.Update(Players(StateOf(1, base3, 1, false, 0), null), 0);
+		capped.ProcessQueue(0);
+		capped.ProcessQueue(1);
+		DZOMS_T.EqInt(w3.GetPromotedCount(), 4, "cap: at most maxNetworked objects promoted");
+		DZOMS_T.EqInt(PromotedAmong(w3, 0, 3), 4, "cap: the nearest objects win");
+		DZOMS_T.Check(capped.GetCapHits() >= 1, "cap: counted");
+		w3.Destroy();
+
+		// a promotion that fails is not retried for a minute (Review Focus 3 and 4 of the plan)
+		DZOMS_ServerWorld w5 = MakeWorld("prox_retry", 2, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -630");
+		vector base5 = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -630";
+		w5.GetObjects().Get(0).type = "DZOMS_No_Such_Class";
+		DZOMS_Proximity retry = new DZOMS_Proximity();
+		retry.Init(w5);
+		retry.m_ActivateDelayMs = 0;
+		retry.Update(Players(StateOf(1, base5, 1, false, 0), null), 0);
+		retry.ProcessQueue(0);
+		DZOMS_T.EqInt(retry.GetFailures(), 1, "retry: the failed promotion is counted");
+		DZOMS_T.Check(w5.IsPromoted(1) && !w5.IsPromoted(0), "retry: the other object was promoted");
+		retry.Update(Players(StateOf(1, base5, 1, false, 0), null), 2000);
+		retry.ProcessQueue(2000);
+		DZOMS_T.EqInt(retry.GetFailures(), 1, "retry: no new attempt within a minute");
+		retry.Update(Players(StateOf(1, base5, 1, false, 0), null), 62000);
+		retry.ProcessQueue(62000);
+		DZOMS_T.EqInt(retry.GetFailures(), 2, "retry: tried again after a minute");
+		w5.Destroy();
+
+		// the exclusion list: a type that is never promoted
+		DZOMS_ServerWorld w4 = MakeWorld("prox_excl", 3, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -560");
+		w4.GetConfig().proximityExclude = {"app*"};
+		DZOMS_Proximity excl = new DZOMS_Proximity();
+		excl.Init(w4);
+		excl.m_ActivateDelayMs = 0;
+		excl.Update(Players(StateOf(1, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -560", 1, false, 0), null), 0);
+		excl.ProcessQueue(0);
+		DZOMS_T.EqInt(w4.GetPromotedCount(), 0, "excluded types are never promoted (glob, any case)");
+		w4.Destroy();
 		w.Destroy();
 	}
 
@@ -852,6 +1020,8 @@ class DZOMS_Test_Proximity
 		RunClassPlacement();
 		RunModelPlacement();
 		RunModelEntries();
+		RunZoneRules();
+		RunProximityRules();
 		RunDisabled();
 		RunPromotion();
 		RunProtocol();

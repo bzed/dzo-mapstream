@@ -17,6 +17,22 @@ class DZOMS_PlayerStates
 			state.id = i;
 			state.pos = player.GetPosition();
 			state.alive = player.IsAlive();
+			state.height = state.pos[1] - g_Game.SurfaceY(state.pos[0], state.pos[2]);
+			Transport transport;
+			HumanCommandVehicle vehicleCommand = player.GetCommand_Vehicle();
+			if (vehicleCommand)
+			{
+				transport = vehicleCommand.GetTransport();
+			}
+			if (transport)
+			{
+				state.inVehicle = true;
+				state.speed = GetVelocity(transport).Length();
+			}
+			else
+			{
+				state.speed = GetVelocity(player).Length();
+			}
 			states.Insert(state);
 		}
 		return states;
@@ -58,9 +74,14 @@ modded class MissionServer
 			proximity.ProcessQueue(now);
 			proximity.AddUsedUs(TickCount(started));
 			string status = proximity.StatusLine(now);
-			if (status != "")
+			if (status != "" && proximityWorld.GetConfig().debugLog)
 			{
 				DZOMS_Log.Info(status);
+				array<string> typeLines = proximity.TypeReport(8);
+				for (int t = 0; t < typeLines.Count(); t++)
+				{
+					DZOMS_Log.Info(typeLines.Get(t));
+				}
 			}
 		}
 
