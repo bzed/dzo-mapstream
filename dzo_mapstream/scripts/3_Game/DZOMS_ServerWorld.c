@@ -431,6 +431,7 @@ class DZOMS_ServerWorld
 		if (e.scale != 1)
 		{
 			obj.SetScale(e.scale);
+			DZOMS_ClientWorld.LogScaleShiftPublic(e.type, obj, e.pos, e.scale);
 		}
 		obj.Update();
 		return obj;

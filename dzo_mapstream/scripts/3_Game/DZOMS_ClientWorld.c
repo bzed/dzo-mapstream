@@ -319,6 +319,35 @@ class DZOMS_ClientWorld
 		DZOMS_Log.Info("placement: " + type + " created " + off.ToString() + " m from its entry, corrected");
 	}
 
+	static ref map<string, int> s_ScaleShiftLogged;
+
+	static void LogScaleShiftPublic(string type, Object obj, vector pos, float scale)
+	{
+		LogScaleShift(type, obj, pos, scale);
+	}
+
+	// does SetScale move the object on this client? (first 3 per type; scaled objects stand elsewhere than in the Editor)
+	protected static void LogScaleShift(string type, Object obj, vector pos, float scale)
+	{
+		if (!s_ScaleShiftLogged)
+		{
+			s_ScaleShiftLogged = new map<string, int>();
+		}
+		vector moved = obj.GetPosition() - pos;
+		if (moved.Length() < 0.02)
+		{
+			return;
+		}
+		int logged = 0;
+		s_ScaleShiftLogged.Find(type, logged);
+		if (logged >= 3)
+		{
+			return;
+		}
+		s_ScaleShiftLogged.Set(type, logged + 1);
+		DZOMS_Log.Info("scale: " + type + " s=" + scale.ToString() + " moved " + moved.ToString() + " by SetScale");
+	}
+
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
 	static Object SpawnLocal(string type, vector pos, vector ori, float scale)
 	{
@@ -348,6 +377,7 @@ class DZOMS_ClientWorld
 		if (scale != 1)
 		{
 			obj.SetScale(scale);
+			LogScaleShift(type, obj, pos, scale);
 		}
 		obj.Update();
 		return obj;
