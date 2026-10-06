@@ -108,6 +108,10 @@ class DZOMS_ServerWorld
 	protected ref map<Object, bool> m_SuppressedSet = new map<Object, bool>();
 	protected ref map<string, bool> m_SeenObjects = new map<string, bool>();
 	protected ref array<ref DZOMS_Batch> m_Batches = new array<ref DZOMS_Batch>();
+	protected ref array<bool> m_Promoted = new array<bool>();	// per object: a networked copy exists (DESIGN 13.4)
+	protected int m_PromotedCount;
+	protected ref array<int> m_ObjectBatch = new array<int>();	// per object: its batch
+	protected ref array<int> m_ObjectIndex = new array<int>();	// per object: its position inside that batch
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
 	protected string m_Digest;
 	protected int m_RejectedFiles;
@@ -127,6 +131,230 @@ class DZOMS_ServerWorld
 	DZOMS_Config GetConfig()
 	{
 		return m_Config;
+	}
+
+	// tests: record broadcasts instead of sending them
+	bool m_Offline;
+	ref array<int> m_BroadcastTypes = new array<int>();
+	ref array<ref DZOMS_IdList> m_BroadcastLists = new array<ref DZOMS_IdList>();
+
+	// network id of the networked copy of a promoted object; false for a local object
+	bool GetNetworkId(int i, out int low, out int high)
+	{
+		low = 0;
+		high = 0;
+		if (!IsPromoted(i) || !m_Spawned.Get(i))
+		{
+			return false;
+		}
+		m_Spawned.Get(i).GetNetworkID(low, high);
+		return low != 0 || high != 0;
+	}
+
+	bool IsPromoted(int i)
+	{
+		if (i < 0 || i >= m_Promoted.Count())
+		{
+			return false;
+		}
+		return m_Promoted.Get(i);
+	}
+
+	// out-of-range indices are ignored
+	void MarkPromoted(int i, bool value)
+	{
+		if (i < 0 || i >= m_Promoted.Count() || m_Promoted.Get(i) == value)
+		{
+			return;
+		}
+		m_Promoted.Set(i, value);
+		if (value)
+		{
+			m_PromotedCount++;
+		}
+		else
+		{
+			m_PromotedCount--;
+		}
+	}
+
+	int GetPromotedCount()
+	{
+		return m_PromotedCount;
+	}
+
+	// one message per 500 ids; target NULL = every client
+	protected void Broadcast(int rpcType, DZOMS_IdList ids, PlayerIdentity target)
+	{
+		int total = ids.Count();
+		int from = 0;
+		while (from < total)
+		{
+			DZOMS_IdList chunk = new DZOMS_IdList();
+			int to = Math.Min(from + DZOMS_IdList.MAX_IDS, total);
+			for (int i = from; i < to; i++)
+			{
+				if (ids.HasNetIds())
+				{
+					chunk.AddNet(ids.batch.Get(i), ids.index.Get(i), ids.netLow.Get(i), ids.netHigh.Get(i));
+				}
+				else
+				{
+					chunk.Add(ids.batch.Get(i), ids.index.Get(i));
+				}
+			}
+			if (m_Offline)
+			{
+				m_BroadcastTypes.Insert(rpcType);
+				m_BroadcastLists.Insert(chunk);
+			}
+			else
+			{
+				ScriptRPC rpc = new ScriptRPC();
+				rpc.Write(chunk);
+				rpc.Send(null, rpcType, true, target);
+			}
+			from = to;
+		}
+	}
+
+	void BroadcastNetworked(DZOMS_IdList ids)
+	{
+		Broadcast(DZOMS_Rpc.OBJECTS_NETWORKED, ids, null);
+	}
+
+	void BroadcastLocal(DZOMS_IdList ids)
+	{
+		Broadcast(DZOMS_Rpc.OBJECTS_LOCAL, ids, null);
+	}
+
+	// the objects that are networked now, for a client that just asked for the manifest
+	void SendFullSet(PlayerIdentity target)
+	{
+		DZOMS_IdList all = new DZOMS_IdList();
+		for (int i = 0; i < m_Promoted.Count(); i++)
+		{
+			int low, high;
+			if (GetNetworkId(i, low, high))
+			{
+				all.AddNet(GetObjectBatch(i), GetObjectIndexInBatch(i), low, high);
+			}
+		}
+		if (all.Count() > 0)
+		{
+			Broadcast(DZOMS_Rpc.OBJECTS_NETWORKED, all, target);
+		}
+	}
+
+	protected ref DZOMS_Proximity m_Proximity;
+
+	// after Load(): proximity networking for this world (DESIGN 13)
+	void StartProximity()
+	{
+		m_Proximity = null;
+		if (m_Config.disableProximity)
+		{
+			DZOMS_Log.Info("proximity networking is switched off in config.json");
+			return;
+		}
+		m_Proximity = new DZOMS_Proximity();
+		m_Proximity.Init(this);
+	}
+
+	DZOMS_Proximity GetProximity()
+	{
+		return m_Proximity;
+	}
+
+	// local object i -> networked copy (DESIGN 13.4). The networked copy exists before the local
+	// one is deleted. False (nothing changed) when it cannot be spawned.
+	bool Promote(int i)
+	{
+		Object old;
+		if (!PromoteKeepOld(i, old))
+		{
+			return false;
+		}
+		g_Game.ObjectDelete(old);
+		return true;
+	}
+
+	// as Promote, but the caller deletes the old local copy later: the path graph needs time to take the new
+	// object in, and zombies walk through the gap when the old obstacle is gone before that
+	bool PromoteKeepOld(int i, out Object oldLocal)
+	{
+		oldLocal = null;
+		if (i < 0 || i >= m_Objects.Count() || m_Promoted.Get(i))
+		{
+			return false;
+		}
+		Object old = m_Spawned.Get(i);
+		if (!old)
+		{
+			return false;
+		}
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), true, true);
+		if (!fresh)
+		{
+			return false;
+		}
+		// a promoted item is decoration: simulated, it would settle on the ground instead of staying
+		// where the map builder put it (found in game: items 0.4 m off after the swap)
+		EntityAI promoted = EntityAI.Cast(fresh);
+		if (promoted)
+		{
+			promoted.DisableSimulation(true);
+		}
+		oldLocal = old;
+		m_Spawned.Set(i, fresh);
+		MarkPromoted(i, true);
+		return true;
+	}
+
+	// networked copy -> local object. The local copy is spawned first; the caller deletes oldNetworked
+	// a moment later (the clients need their local copy back first). False (nothing changed) when the
+	// local copy cannot be spawned.
+	bool Demote(int i, out Object oldNetworked)
+	{
+		oldNetworked = null;
+		if (i < 0 || i >= m_Objects.Count() || !m_Promoted.Get(i))
+		{
+			return false;
+		}
+		Object old = m_Spawned.Get(i);
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), false, true);
+		if (!fresh)
+		{
+			return false;
+		}
+		m_Spawned.Set(i, fresh);
+		MarkPromoted(i, false);
+		oldNetworked = old;
+		return true;
+	}
+
+	int GetObjectCount()
+	{
+		return m_Objects.Count();
+	}
+
+	// batch of object i, -1 for an invalid index
+	int GetObjectBatch(int i)
+	{
+		if (i < 0 || i >= m_ObjectBatch.Count())
+		{
+			return -1;
+		}
+		return m_ObjectBatch.Get(i);
+	}
+
+	int GetObjectIndexInBatch(int i)
+	{
+		if (i < 0 || i >= m_ObjectIndex.Count())
+		{
+			return -1;
+		}
+		return m_ObjectIndex.Get(i);
 	}
 
 	array<ref DZOMS_ObjectEntry> GetObjects()
@@ -167,12 +395,35 @@ class DZOMS_ServerWorld
 
 	static Object SpawnOnServer(DZOMS_ObjectEntry e, bool networked)
 	{
+		return SpawnOnServerEx(e, networked, true);
+	}
+
+	static Object SpawnOnServerEx(DZOMS_ObjectEntry e, bool networked, bool pathgraph)
+	{
 		if (DZOMS_TypeName.IsModel(e.type))
 		{
-			return g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, e.ori, e.scale, !networked);
+			// as the map file gives it, the engine puts the model's base on the position and takes radians;
+			// an entry with FLAG_ORIGIN holds the object's origin (degrees) and is put there exactly. The
+			// scale is passed to the creation: SetOrientation would reset it.
+			bool origin = (e.flags & DZOMS_Batch.FLAG_ORIGIN) == DZOMS_Batch.FLAG_ORIGIN;
+			vector rawOri = e.ori;
+			if (origin)
+			{
+				rawOri = e.ori * Math.DEG2RAD;
+			}
+			Object model = g_Game.CreateStaticObjectUsingP3D(e.type, e.pos, rawOri, e.scale, !networked);
+			if (model && origin)
+			{
+				DZOMS_Placement.Apply(model, e.pos, e.ori, e.scale);
+			}
+			return model;
 		}
 
-		int flags = ECE_SETUP | ECE_CREATEPHYSICS | ECE_UPDATEPATHGRAPH | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD | ECE_NOPERSISTENCY_CHAR;
+		int flags = ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD | ECE_NOPERSISTENCY_CHAR;
+		if (pathgraph)
+		{
+			flags = flags | ECE_UPDATEPATHGRAPH;
+		}
 		if (!networked)
 		{
 			flags = flags | ECE_LOCAL;
@@ -182,6 +433,7 @@ class DZOMS_ServerWorld
 		{
 			return null;
 		}
+		obj.SetPosition(e.pos);
 		obj.SetOrientation(e.ori);
 		if (e.scale != 1)
 		{
@@ -245,7 +497,19 @@ class DZOMS_ServerWorld
 
 		SuppressHidden();
 
-		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds);
+		// ECE_UPDATEPATHGRAPH only marks the objects; vanilla's object spawner and the Editor's loader
+		// process the marks once after spawning, otherwise zombies ignore the objects
+		int pathStart = TickCount(0);
+		g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
+		DZOMS_Log.Info("path graph updated for the map objects in " + (TickCount(pathStart) / 1000).ToString() + " ms");
+
+		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
+		m_Promoted.Clear();
+		m_PromotedCount = 0;
+		for (int pi = 0; pi < m_Objects.Count(); pi++)
+		{
+			m_Promoted.Insert(false);
+		}
 		m_Manifest.viewDistance = m_Config.viewDistance;
 		m_Manifest.proxyDistance = m_Config.proxyDistance;
 		m_Manifest.disableCache = m_Config.disableCache;
@@ -401,11 +665,19 @@ class DZOMS_ServerWorld
 			bool isNetworked = SpawnEntry(e, rules, spawned, rule);
 			if (isNetworked)
 			{
-				e.flags = DZOMS_Batch.FLAG_NETWORKED;
+				e.flags = e.flags | DZOMS_Batch.FLAG_NETWORKED;
 			}
 			if (!spawned)
 			{
 				report.CountFailed(src.Type);
+			}
+			else if (DZOMS_TypeName.IsModel(e.type) && (e.flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+			{
+				// the Editor shows the object where the engine put it: that origin and its yaw in degrees
+				// are what the clients and later respawns use
+				e.pos = spawned.GetPosition();
+				e.ori = spawned.GetOrientation();
+				e.flags = e.flags | DZOMS_Batch.FLAG_ORIGIN;
 			}
 			report.CountObject(isNetworked, src.Type, rule);
 			m_Objects.Insert(e);
@@ -536,6 +808,7 @@ class DZOMS_ServerWorld
 			ScriptRPC manifestRpc = new ScriptRPC();
 			manifestRpc.Write(m_Manifest);
 			manifestRpc.Send(null, DZOMS_Rpc.MANIFEST, true, sender);
+			SendFullSet(sender);
 		}
 		else if (answer == ANSWER_BATCH)
 		{

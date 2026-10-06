@@ -45,9 +45,64 @@ class DZOMS_Test_BatchBuilder
 		}
 	}
 
+	// every input object maps to a batch entry with the same type, position and orientation
+	static void RunMapping()
+	{
+		array<ref DZOMS_ObjectEntry> list = new array<ref DZOMS_ObjectEntry>();
+		Add(list, "A", "10 10 10", 30);
+		Add(list, "B", "70 10 10", 20);
+		Add(list, "A", "900 10 10", 25);
+		Add(list, "C", "10 10 10", 60);
+		array<ref DZOMS_Batch> batches = new array<ref DZOMS_Batch>();
+		array<float> bounds = new array<float>();
+		array<int> objBatch = new array<int>();
+		array<int> objIndex = new array<int>();
+		DZOMS_BatchBuilder.Build(list, 50, batches, bounds, objBatch, objIndex);
+		DZOMS_T.EqInt(objBatch.Count(), list.Count(), "mapping: batch array has the input length");
+		DZOMS_T.EqInt(objIndex.Count(), list.Count(), "mapping: index array has the input length");
+		int bad = 0;
+		map<string, bool> seen = new map<string, bool>();
+		for (int i = 0; i < list.Count(); i++)
+		{
+			if (i >= objBatch.Count() || i >= objIndex.Count())
+			{
+				bad++;
+				continue;
+			}
+			int b = objBatch.Get(i);
+			int k = objIndex.Get(i);
+			if (b < 0 || b >= batches.Count() || k < 0 || k >= batches.Get(b).Count())
+			{
+				bad++;
+				continue;
+			}
+			DZOMS_Batch batch = batches.Get(b);
+			DZOMS_ObjectEntry e = list.Get(i);
+			if (batch.GetType(k) != e.type || batch.positions.Get(k) != e.pos || batch.orientations.Get(k) != e.ori)
+			{
+				bad++;
+			}
+			string key = b.ToString() + "/" + k.ToString();
+			if (seen.Contains(key))
+			{
+				bad++;
+			}
+			seen.Set(key, true);
+		}
+		DZOMS_T.EqInt(bad, 0, "mapping: every object resolves to its own batch entry");
+		DZOMS_T.EqInt(seen.Count(), list.Count(), "mapping: no two objects share an entry");
+
+		// the old signature builds the same batches
+		array<ref DZOMS_Batch> again = new array<ref DZOMS_Batch>();
+		array<float> boundsAgain = new array<float>();
+		DZOMS_BatchBuilder.Build(list, 50, again, boundsAgain);
+		DZOMS_T.Eq(DigestOf(again), DigestOf(batches), "mapping: same batches as the four-argument build");
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("batchbuilder");
+		RunMapping();
 		array<ref DZOMS_ObjectEntry> l1 = new array<ref DZOMS_ObjectEntry>();
 		Add(l1, "A", "10 10 10", 3);
 		Add(l1, "A", "70 10 10", 1);

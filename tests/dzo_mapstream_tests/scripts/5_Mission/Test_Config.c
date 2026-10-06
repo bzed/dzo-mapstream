@@ -151,6 +151,47 @@ class DZOMS_Test_Config
 		}
 		DZOMS_T.EqInt(c.batchSize, 1000, "batchSize clamped down");
 
+		// proximity networking options (DESIGN 13.7): zero values are the defaults, ranges are clamped
+		dir = CaseDir("proximity_options");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.EqFloat(c.networkRadius, 150, "default networkRadius");
+		DZOMS_T.EqFloat(c.vehicleRadius, 40, "default vehicleRadius");
+		DZOMS_T.EqFloat(c.maxFootSpeed, 6, "default maxFootSpeed");
+		DZOMS_T.EqFloat(c.maxVehicleSpeed, 8, "default maxVehicleSpeed");
+		DZOMS_T.EqFloat(c.maxHeight, 20, "default maxHeight");
+		DZOMS_T.EqInt(c.maxNetworked, 6000, "default maxNetworked");
+		DZOMS_T.Check(c.proximityExclude != null && c.proximityExclude.Count() == 0, "default proximityExclude is empty");
+		WriteText(dir + "/config.json", "{ \"networkRadius\": 3, \"vehicleRadius\": 9999, \"maxFootSpeed\": -1, \"maxHeight\": 5, \"maxNetworked\": 999999, \"proximityExclude\": [\"*Bush*\", \"@doors\", \"Land_X\"] }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.EqFloat(c.networkRadius, 5, "networkRadius clamped up");
+		DZOMS_T.EqFloat(c.vehicleRadius, 500, "vehicleRadius clamped down");
+		DZOMS_T.EqFloat(c.maxFootSpeed, 6, "a negative speed means the default");
+		DZOMS_T.EqFloat(c.maxHeight, 5, "maxHeight as given");
+		DZOMS_T.EqInt(c.maxNetworked, 20000, "maxNetworked clamped down");
+		DZOMS_T.EqInt(c.proximityExclude.Count(), 2, "proximityExclude drops @ tokens");
+		if (c.proximityExclude.Count() == 2)
+		{
+			DZOMS_T.Eq(c.proximityExclude.Get(0), "*Bush*", "proximityExclude keeps patterns");
+			DZOMS_T.Eq(c.proximityExclude.Get(1), "Land_X", "proximityExclude keeps names");
+		}
+
+		// a version 1 file without the new options is loaded as it is and not rewritten
+		dir = CaseDir("proximity_old_file");
+		WriteText(dir + "/config.json", "{ \"maps\": [], \"batchSize\": 100 }");
+		before = ReadText(dir + "/config.json");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.EqFloat(c.networkRadius, 150, "old file: default radius");
+		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "old file: not rewritten");
+		DZOMS_T.Check(!FileExist(dir + "/config.json.v1.bak"), "old file: no backup");
+
+		// proximity networking switch
+		dir = CaseDir("proximity_off");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(!c.disableProximity, "proximity networking is on by default");
+		WriteText(dir + "/config.json", "{ \"disableProximity\": true }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.disableProximity, "proximity networking can be switched off");
+
 		// config version (DESIGN 13.5)
 		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(0), 1, "EffectiveVersion 0 is 1");
 		DZOMS_T.EqInt(DZOMS_Config.EffectiveVersion(1), 1, "EffectiveVersion 1 is 1");

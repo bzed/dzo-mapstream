@@ -41,6 +41,13 @@ are the points below that are not listed here as confirmed. Before relying on th
 5. Hidden world objects are hidden.
 6. Once with `batchSize: 1000` and a map with long `.p3d` paths: every batch arrives.
 7. `*Stair*` and `*Switch*` rules: decide whether they stay in the default config.
+8. Proximity networking (DESIGN 13.8): climb and vault onto objects that are local a moment before, also
+   onto a higher part of the same object; no hole and no double at the swap in both directions; scaled
+   objects (piers, sidewalks) have the right size close up, far away and after a log out and in; model
+   objects (`.p3d`) stand where the Editor shows them (compare a few positions); a car driven past at
+   50 km/h, a helicopter at 40 m and a sprint swap nothing (`debugLog` shows the counters); getting out of
+   a car networks the area after two seconds; login time compared with the previous release; zombies path
+   around walls, networked and local.
 
 ## Packaging and Workshop upload
 

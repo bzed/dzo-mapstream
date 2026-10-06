@@ -16,6 +16,7 @@ This mod does it differently for most objects:
 [*] The server sends the map to each player [b]once[/b] as a small block of plain data. The player's game keeps a copy, so the next visit needs no download.
 [*] The server and every player's game then create these objects [b]locally[/b]. They never change, so nothing has to be kept in sync. Zombies and AI treat them as normal, solid objects.
 [*] Objects that must work for everybody (doors, ladders, levers, wells, ...) stay [b]networked[/b]. The mod decides which ones with a list of rules. The defaults cover the usual cases, and you can change them.
+[*] Everything else becomes networked [b]only near a player who can use it[/b]: players can only climb onto networked objects, so the server swaps the local objects around a player (150 m on foot by default) for networked copies and back again. Fast movers (aircraft, fast cars, sprinting) get nothing swapped and cost the server almost nothing.
 [*] Objects you deleted in the Editor to clear space are hidden in the game, too.
 [*] Players see a part of the map when they come close to it, so the map appears around them as they walk or fly.
 [/list]
@@ -40,7 +41,7 @@ Open the newest script_*.log in your profiles folder and search for [code][dzo-m
 
 [h2]Settings[/h2]
 
-The file [b]config.json[/b] in the dzo/mapstream folder lets you change how far players see the map, which objects are networked, and which files to switch off. Most servers can keep the defaults. Details, all settings and a troubleshooting list are in the README:
+The file [b]config.json[/b] in the dzo/mapstream folder lets you change how far players see the map, which objects are networked (and how far around a player), and which files to switch off. Most servers can keep the defaults. Details, all settings and a troubleshooting list are in the README:
 
 [url=https://github.com/bzed/dzo-mapstream/blob/main/README.md]README on GitHub (full instructions)[/url]
 

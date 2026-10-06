@@ -5,7 +5,8 @@ as plain data instead of thousands of networked objects. The server and every
 client spawn the objects locally. Objects that only work when networked (doors,
 ladders, levers, ...) are spawned as networked objects by the server.
 
-Target: DayZ 1.29 and 1.30. Status: design, nothing implemented yet.
+Target: DayZ 1.29 and 1.30. Status: implemented; section 13 (proximity networking) was added after the first
+in-game tests and is described there, with the findings it rests on.
 
 ## 1. Goals
 
@@ -20,8 +21,7 @@ Target: DayZ 1.29 and 1.30. Status: design, nothing implemented yet.
 6. No unbounded work per frame, no unbounded memory, no trust in client input.
 
 Not in scope for the first version: other map formats, a download progress UI,
-cache encryption (planned, section 12), static objects instead of local class
-objects (planned, section 13).
+cache encryption (planned, section 12).
 
 ## 2. Dependencies and packaging
 
@@ -56,6 +56,8 @@ objects (planned, section 13).
   through the normal network bubble and never spawn it themselves (except as a
   distant proxy, section 9.6).
 - **Local object**: spawned by the server and by every client with `ECE_LOCAL`.
+- **Promoted object**: a local object that the server has swapped for a networked copy because a player
+  is near it (section 13); it goes back to local when nobody needs it.
 - **Batch**: a group of up to `batchSize` objects close to each other. Unit of
   download, caching, hashing, spawning and unloading.
 - **Manifest**: per-server list of batches (bounds + hash) plus client settings.
@@ -124,6 +126,11 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
 | `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
 | `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
+| `networkRadius`, `vehicleRadius` | float, m | proximity networking: zone radius of a player on foot / in a slow vehicle (clamped 5..500) | 150 / 40 |
+| `maxFootSpeed`, `maxVehicleSpeed`, `maxHeight` | float | faster (m/s) or higher above ground (m): no zone | 6 / 8 / 20 |
+| `maxNetworked` | int | most objects networked by proximity at once (1..20000) | 6000 |
+| `proximityExclude` | array of name patterns | types never networked by proximity (no `@` tokens) | none |
+| `disableProximity` | bool | switch proximity networking off | on |
 
 **Every field is designed so that its zero value is the default.** Verified on 1.29:
 `JsonFileLoader<T>.LoadFile()` does not keep the class's initial values for fields
@@ -305,7 +312,13 @@ Every object is spawned on the server, local or networked:
   - networked: the same without `ECE_LOCAL`. `ECE_NOPERSISTENCY_WORLD` is
     required, otherwise the objects end up in the persistence and get duplicated
     on the next restart.
-- Model objects (`.p3d`): `CreateStaticObjectUsingP3D(path, pos, ori, scale, createLocal)`.
+- Model objects (`.p3d`): `CreateStaticObjectUsingP3D(path, pos, ori, scale, createLocal)` with the file's
+  position (the engine puts the model's base there) and orientation (radians), the scale as a creation
+  parameter. The server then rewrites the entry to the object's actual origin and yaw in degrees and marks
+  it `FLAG_ORIGIN`; clients and respawns place exactly there (13.10d). Class objects get `SetPosition`,
+  `SetOrientation` (degrees) and `SetScale` after creation.
+- After all maps are loaded, `ProcessMarkedObjectsForPathgraphUpdate()` is called once: `ECE_UPDATEPATHGRAPH`
+  only marks the objects, and zombies ignore them until the marks are processed (13.10).
 - A failed spawn (`NULL`) is logged once per type with the count, the object stays
   in the data (clients may have the content mod even if the server does not).
 
@@ -362,6 +375,8 @@ RPC ids: four consecutive ints starting at `0x445A4D01` (written as constants in
 | `MANIFEST` | server -> client | `DZOMS_Manifest` |
 | `REQUEST_BATCH` | client -> server | `int batchIndex` |
 | `BATCH` | server -> client | `DZOMS_Batch` |
+| `OBJECTS_NETWORKED` | server -> all clients | `DZOMS_IdList` (batch, index, network id of the copy), section 13.5 |
+| `OBJECTS_LOCAL` | server -> all clients | `DZOMS_IdList` (batch, index) |
 
 Payload classes contain only ints, floats, bools, strings, vectors and arrays of
 those. **No maps and no nested class instances**: `FileSerializer` does not restore
@@ -371,7 +386,7 @@ while flat arrays round-trip bit-exactly through `FileSerializer` and `ScriptRPC
 ```c
 class DZOMS_Manifest
 {
-    int protocolVersion;            // 1
+    int protocolVersion;            // 2 (the two object messages of section 13.5)
     float viewDistance;
     float proxyDistance;
     bool disableCache;
@@ -561,6 +576,11 @@ Server, headless, before every release:
 7. Client code compiles: build a test PBO with `#ifdef SERVER` / `#ifndef SERVER`
    swapped and boot it on the server.
 
+Proximity networking, headless (section 13.8): zone rules table, activation delay, cap, exclusion list,
+promotion and demotion order and budgets, create-before-delete, retry delays, protocol messages, client
+swap (scale, model twins, login, decoys), model placement. The real player states, the swap on a real
+client, climbing and the path graph need the in-game list of 13.8.
+
 Client, in game (cannot be automated):
 
 1. First join downloads closest-first, the area around the player is complete
@@ -692,249 +712,370 @@ Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
   an invalid one is reported.
 - Existing cache tests (truncated, wrong version, random, missing file) for version 2.
 
-## 13. Planned: static objects instead of local class objects
+## 13. Proximity networking
 
-Not implemented yet; a plan ready to implement once the gate test (13.2) passes. It
-replaces the local class objects of sections 3, 6.2 and 9.4: afterwards every object
-is either **networked** (a class object the server creates) or **static** (a model
-the server and every client create with `CreateStaticObjectUsingP3D`). Local class
-objects (`CreateObjectEx` with `ECE_LOCAL`) are no longer used for map objects, only
-for the distant proxies (9.6) and the probe on the server (6.2).
+Implemented. Every map object stays a local object, and the server swaps in real networked copies where
+a player can use them, so that players can climb the objects (13.1). The sections below are the design and
+the findings from the in-game tests (13.10a to 13.10d) that shaped it. Admin documentation is in the README.
 
-### 13.1 Problem (found in game)
+### 13.1 Problem and findings (2026-10-04, dedicated server + 1.29 client)
 
-Players cannot climb or vault onto local class objects. Walking, ramps and stairs
-on them work. When the player tries to climb, they jump instead, hang between the
-lower part and the part they want to reach (also within one object, e.g. from the
-hood of a wreck up to its cabin), then fall, sometimes through the lower part.
-Verified with `HMMV_Wreck`: local, it cannot be climbed; made networked by a rule,
-the same object can.
+Players cannot climb or vault onto local class objects. Walking, ramps and stairs on them work.
+When the player tries to climb, they jump instead, hang between the lower part and the part they
+want to reach (also within one object), then fall. Networked objects (a wreck made networked by
+a rule) climb fine.
 
-Cause, inferred (the climb test is engine code, `HumanCommandClimb.DoPerformClimbTest`):
-the climb result `SHumanCommandClimbResult` stores the grab and stand points relative
-to parent entities (`m_GrabPointParent`, `m_ClimbStandPointParent`,
-`m_ClimbOverStandPointParent`), and the climb runs on the client and on the server.
-A local class object is two unrelated entities, one per side, without a network id,
-so client and server cannot agree on the parent; the server's correction makes the
-player fall. Walking needs no reference to an object, so it is not affected.
+Measured with a debug build that logged every jump or climb press on the client and on the server
+(about 100 presses, three test rounds):
 
-Nobody else uses local class objects for map content. Vanilla `ObjectSpawner`
-(cfggameplay `objectSpawnersArr`, runs on the server only) creates class objects
-networked and `.p3d` objects with `CreateStaticObjectUsingP3D(..., createLocal = true)`;
-Expansion's `ExpansionWorldObjectsModule.SpawnObject` and the Dabs Framework
-`EditorObjectData.CreateObject` create networked objects.
+- The server's climb test (`HumanCommandClimb.DoPerformClimbTest` inside the player's jump
+  handling) **never returned a climb whose parent object was a local object**. Every one of the
+  server's climbs (8 of 8 in the last round, and all in the earlier ones) had a parent with a
+  network id; the client found climbs on local parents 16 times in the same round (at 0.4 to
+  2.6 m height) and the server found nothing at the same position. The server then does a plain
+  jump, client and server disagree and the player is corrected.
+- The server **does have** the local objects: they are in its world (`GetObjectsAtPosition3D`),
+  at the same position and orientation as on the client (to 0.001 m), and a geometry ray hits
+  them. Only the climb test ignores them.
+- A headless server (test players without a connection, `CreatePlayer(NULL, ...)`) finds local
+  objects in the climb test like networked ones: local class objects, local and networked static
+  models, and a container the production world spawned at boot. So the rule applies to connected
+  players. Inferred mechanism (engine code, not readable): a climb result names its parent
+  entity, which must be resolvable on both sides, so for a remote player the engine only
+  accepts parents with a network id.
+- **Static models do not help.** A prototype that spawned every non-networked class object as its
+  static model (`CreateStaticObjectUsingP3D`, local on server and client) did not fix climbing;
+  it also placed objects wrongly (13.9).
+- Everyone else networks climbable objects: the Editor's own server loader creates every object
+  networked (class objects without `ECE_LOCAL`, models with `createLocal = false`), vanilla
+  `ObjectSpawner` creates class objects networked, Expansion and the Dabs Framework as well.
 
-### 13.2 Gate: static objects must climb in multiplayer
+So a player can only climb what is networked, and any object can be climbed when a player reaches
+a suitable surface. Networking the whole map is what this mod exists to avoid. The answer is to
+network an object while a player is close enough to use it.
 
-The only climbing test with static objects so far ran in the DayZ Editor, i.e.
-offline, without a separate client and server; local class objects climb fine there,
-too. Before implementing anything:
+### 13.2 Goals
 
-1. In a test map, place the `HMMV_Wreck` model (its `CfgVehicles HMMV_Wreck model`)
-   as a model object, next to a networked `HMMV_Wreck`.
-2. Dedicated server plus one client with this mod: vault and climb onto the model
-   (also hood -> cabin), walk on it, compare with the networked one.
-3. Check that the client sees **one** model, not two. The server spawns `.p3d`
-   objects with `createLocal = true` and every client spawns its own copy; if the
-   server's copy reached the clients through the network, every model would be
-   doubled. (`.p3d` objects already take this path today, so this checks the
-   current code as well.)
+1. Every object is a local object by default, exactly as today. Login, download, caching and
+   spawning are unchanged and as fast as before.
+2. An object becomes a real networked object while a player who can use it is near it; it goes
+   back to local when nobody needs it.
+3. **Performance first, fast movers most of all.** A player in a helicopter, in a fast car or
+   sprinting costs the server (almost) nothing and gets no networked objects.
+4. Bounded work: per second, per frame and in total number of networked objects.
+5. No gaps and no doubles on the client: the swap in both directions is never visible.
 
-If static objects cannot be climbed either, this plan is void; the fallback is to
-network everything that should be climbable, at the cost this mod exists to avoid.
+### 13.3 Which players need networked objects
 
-### 13.3 Spawn modes
+Evaluated once per `updateInterval` (1 s) for every connected, living player. A player
+produces **no zone** (needs nothing) or a **zone**: a disc around the player.
 
-New config field `spawnMode`, globally and per map file:
-
-| Field | Type | Meaning | `""` / missing means |
-|---|---|---|---|
-| `spawnMode` | string | `"static"` or `"editor"` (case-insensitive) | `"static"` |
-| `maps[].spawnMode` | string | the same for one map file | the global value |
-
-An unknown value is a config error: logged, the field is treated as missing.
-
-What happens to each object (rules = the networked rules of 5.3, with the
-additions of 13.4):
-
-| Object in the `.dze` | `"static"` (default) | `"editor"` |
-|---|---|---|
-| class object, a rule makes it networked | networked | networked |
-| class object, otherwise | static, with the class's model (13.6) | networked |
-| class object without a model | networked, logged (`no model`) | networked |
-| model object (`.p3d`) | rules decide; not networked = static | the same |
-
-- `"static"` is for maps built from class objects, which is how the Editor places
-  everything by default. Only what needs the network (rules) is networked.
-- `"editor"` takes the map builder's choice from the Editor: the Editor can turn an
-  object into a static object (stored as its `.p3d` path in the `.dze`) and back
-  into a class object. Class objects are networked without looking at the rules;
-  the debug report shows `(editor)` as their rule.
-- The meaning of the rules does not change, only the name of the other outcome:
-  a matching `!pattern` now makes an object **static** instead of local. Logs,
-  README and report say "static".
-- A class object that becomes static loses everything its class adds to the model:
-  script behaviour (lights, particles, sounds, actions), damage and ruins, and
-  retextures (13.4). The default rules keep the known cases networked; anything
-  else needs a rule or `"editor"` mode.
-
-### 13.4 Retextured classes: `@retextured`
-
-Many classes share one model and only differ in `hiddenSelectionsTextures` /
-`hiddenSelectionsMaterials` (colour variants of containers, wrecks, signs).
-`CreateStaticObjectUsingP3D` only takes a model, so the static copy would show the
-model's own textures. New rule token:
-
-| Rule | Matches |
+| Situation | Zone |
 |---|---|
-| `@retextured` | class objects whose `CfgVehicles <type>` has a non-empty `hiddenSelectionsTextures` or `hiddenSelectionsMaterials` array |
-| `!@retextured` | negated form: such objects become static with the model's own textures |
+| on foot, speed <= `maxFootSpeed`, height above ground <= `maxHeight` | radius `networkRadius` |
+| in a vehicle, speed <= `maxVehicleSpeed`, height above ground <= `maxHeight` | radius `vehicleRadius` |
+| anything faster, or higher than `maxHeight` above the ground | none |
+| dead, no player object | none |
 
-- Decided from the config (`g_Game.ConfigGetTextArray`), no probe object needed.
-  Verify that inherited values are returned (a colour variant usually inherits
-  `hiddenSelections` from its base class and only sets the textures).
-- `.p3d` objects never match.
-- Measure on the test maps how many types it selects. If base classes set these
-  arrays to the model's own textures, it selects too much; then compare the
-  textures with the base class before counting a class as retextured.
-- The default config gets `@retextured` after `@fixedItems`. Existing
-  `config.json` files get it through the config migration to version 2 (13.5).
+- Leaving a vehicle is "on foot" from then on, so getting out of a car in a base gets that
+  base networked (after the `activateDelay`).
+- A zone only opens after the player has qualified for `activateDelay` (2 s) in a row, so a
+  runner who stops for a moment or a car at traffic speed does not cause churn.
+- Speed comes from the position change between two updates (the vehicle's speed for a
+  vehicle driver, whichever the API offers; the implementation checks `GetVelocity` and
+  `Transport` against `api.json` first). Height above ground is
+  `position.y - SurfaceY(x, z)`.
+- Defaults: `networkRadius` 150 m (40 m flickered in the prototype check, 13.10; the user
+  wants 100 to 200 m on foot), `vehicleRadius` 40 m, `maxFootSpeed` 6 m/s (sprinting is faster), `maxVehicleSpeed` 8 m/s
+  (about 29 km/h), `maxHeight` 20 m. All configurable (13.7).
 
-### 13.5 Config version and migration
+### 13.4 Server
 
-The versioning itself (field `configVersion`, loading, backup, write-back) is in 5.2 and 5.6 and
-ships first, with `CURRENT_VERSION = 1`. This release raises it to 2 and adds the first step.
-`MigrateTo2` is `DZOMS_ConfigMigration.Step(c, 2, what)`.
+New class `DZOMS_Proximity`, owned by the server world, driven from `MissionServer.OnUpdate()`
+with a timer (no work on frames between updates other than the queue, below).
 
-**Migration 1 -> 2:** insert `"@retextured"` at the **start** of the global
-`networked` list, unless some rule in it already contains `@retextured` (any case,
-also `!@retextured`). At the start, every existing admin rule comes later and still
-wins (last match wins, 5.3), so an admin's `!Land_Container_1Bo` keeps that type
-static. Per-map lists are not touched: they come after the global list anyway.
-`spawnMode` is not added: missing means `"static"`, the new default.
+**Data.** Built once at load, no per-update scans of all objects:
+- A grid index (32 m cells) over the objects that may be promoted: every entry that is not
+  already networked by a rule, whose spawn succeeded, and that no `proximityExclude` rule
+  (13.7) removes. A cell holds the indices of its objects.
+- Per object a state: `LOCAL` (the server's local copy exists), `NETWORKED` (a networked copy
+  exists, the local copy is gone), `TO_NETWORKED` or `TO_LOCAL` (queued or in transition), and
+  the time it last had a reason to be networked. The existing per-object slot of the server
+  world (`m_Spawned`) refers to whichever copy exists.
 
-Rules for later versions: a new option whose zero value is its default needs no
-migration (missing = default), only the version bump if the file should show it;
-a change of meaning or of a default that old files must not silently get needs a
-migration step. Every step gets a test with a file of the old version.
+**Update (once per `updateInterval`).**
+1. Build the zone list from the players (13.3).
+2. For every cell touched by a zone (zone radius plus one cell), for every `LOCAL` object whose
+   distance to a zone centre is within that zone's radius: queue `TO_NETWORKED`, ordered by
+   distance to the nearest player, nearest first.
+3. For every `NETWORKED` object: if it is within the radius of any zone, refresh its "needed"
+   time. Otherwise, if it is farther than `radius * 1.5` (half the radius as hysteresis) from every zone and has
+   not been needed for `releaseDelay` (30 s), queue `TO_LOCAL`, farthest first. Step 3 walks
+   the list of networked objects only (at most `maxNetworked`), not the map.
+4. Over `maxNetworked` (default 6000): do not queue more promotions, nearest first wins; log a
+   warning once per minute.
 
-### 13.6 Server: spawning and data
+**Queue (every frame, budgeted).** At most `PROXIMITY_CREATES_PER_FRAME` promotions and
+`PROXIMITY_DELETES_PER_FRAME` demotions per frame (start values 5 and 10, tuned by measurement,
+13.10), promotions first. Pathgraph updates are batched: one
+`ProcessMarkedObjectsForPathgraphUpdate()` per processed group, not per object.
 
-Decision, extending 6.2 (`SpawnEntry`):
+- **Promote** (`LOCAL` -> `NETWORKED`): spawn the networked copy with the same call a rule
+  networked object uses today (6.2: class objects without `ECE_LOCAL`; model objects
+  `createLocal = false` followed by `SetOrientation` and `SetPosition`, 13.9), then delete the
+  server's local copy, then (after `SWAP_DELAY`, 0.5 s) announce the object to the clients
+  (13.5). The networked copy exists before the local one goes, so the server never has a gap.
+- **Demote** (`NETWORKED` -> `LOCAL`): announce "going local" to the clients first, spawn the
+  server's local copy, and delete the networked copy after `SWAP_DELAY` (the clients have their
+  local copy again by then).
+- A failed spawn leaves the object `LOCAL`, is counted, and is not retried for a minute.
+- Objects that a rule networks from the start are not part of this and never change.
 
-1. `.p3d` types: unchanged.
-2. Class types in `"editor"` mode: networked, no rule evaluation.
-3. Class types in `"static"` mode: rules as today (including the probe spawn for
-   `@doors`, `@ladders`, `@actions`, `@fixedItems`; the probe object is always
-   deleted afterwards). Networked: spawn networked. Otherwise look up the model
-   (`DZOMS_TypeName.ModelPath`, cached per type); empty: spawn networked and count as
-   `no model`; else spawn static with `CreateStaticObjectUsingP3D(model, pos, ori,
-   scale, true)`.
-4. Cache the result per (type name, rule list, spawn mode) as today, including the
-   model path.
+### 13.5 Protocol and client
 
-The data entry of a static object carries the **model path as its type**, exactly as
-if the `.dze` had contained the model. Clients already spawn `.p3d` types as static
-objects (9.4), so the client's spawn code does not change, and the hash (10.1)
-covers the model. All batch hashes change once with this version, so every client
-downloads the maps once more; protocol and cache format stay the same.
+Protocol version 2. Object ids on the wire are pairs `(batchIndex, indexInBatch)`: batches are
+deterministic (6.3) and their contents never change while the digest is the same.
 
-- Model path string: the `model` config value is written like `\DZ\...\x.p3d`; pass it
-  in the same form that `.p3d` entries of `.dze` files have (look at one when
-  implementing; `ModelPath()` lower-cases and turns `\` into `/`, which is for
-  matching, not for spawning). The gate test (13.2) uses the same string.
-- Duplicates (6.1 step 4) and rules use the class name, as now; the conversion
-  happens after both.
-- Pathgraph: class objects used `ECE_UPDATEPATHGRAPH`. Vanilla calls
-  `g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate()` once after its object
-  spawner; do the same once after all maps are loaded. In-game test: zombies walk
-  around static objects instead of through them.
-- Distant proxies (9.6) only exist for networked objects and stay class objects.
+| Id | Direction | Payload |
+|---|---|---|
+| `OBJECTS_NETWORKED` | server -> all clients (broadcast) | arrays `batch[]`, `index[]`, `netLow[]`, `netHigh[]` (the network id of the networked copy) |
+| `OBJECTS_LOCAL` | server -> all clients (broadcast) | arrays `batch[]`, `index[]` |
 
-### 13.7 Report
+- A client that asks for the manifest also gets the full current set of networked ids, in
+  `OBJECTS_NETWORKED` messages of at most 500 ids, so a joining player sees the right state.
+- The client keeps a `map<int, bool>` of announced ids (key `batch * 1024 + index`; batches
+  have at most 1000 objects) with at most `maxNetworked` entries.
 
-The per-map line counts `networked` and `static` (instead of `local`), plus
-`no model`. With `debugLog`, networked types list the deciding rule as before, or
-`(editor)` or `(no model)`; static objects converted from classes are not listed one
-by one, only counted.
+Client behaviour (`DZOMS_ClientWorld`):
+- **Spawning** (9.3, 9.4): an object whose id is in the set is not spawned as a local copy
+  (the networked copy arrives through the network).
+- **`OBJECTS_NETWORKED`:** add the ids to the set. For ids whose local copy exists, put the
+  object on a pending list. Every update, within a budget, a pending object whose networked
+  instance is present has its local copy deleted. "Present" means: the object with the announced
+  network id (`GetObjectByNetworkId(netLow, netHigh)`) exists and has the same type name and
+  is within 5 cm of the entry's position. The type and position search of 9.6 is **not** used:
+  a hidden world object at the same place (the Editor replaced it) would pass it. After 10 s without an instance the object is dropped from the list and
+  keeps its local copy (it only loses climbing), counted in the debug log.
+- **`OBJECTS_LOCAL`:** remove the ids from the set. For ids in a loaded batch without a local
+  copy, spawn it again (budgeted like batch spawning). The server deletes its networked copy
+  after `SWAP_DELAY`; both copies have the same geometry, so the overlap is not visible.
+- Unloading a batch (9.2) deletes its local copies as before and forgets pending swaps of
+  that batch; the ids stay in the set.
+- Distant proxies (9.6) are unchanged and apply only to rule networked objects.
 
-### 13.8 For map builders (README text, to be written with the implementation)
+Why messages and not a client-side scan: the server decides who needs what and knows what it
+created; a client scan would have to match every nearby networked entity to its own data
+(type and position), once per second per player, to find the same thing. Ids cost eight bytes
+per object and change.
 
-The README gets a section "Building maps for this mod" with this content:
+### 13.6 Fast movers and login
 
-- By default every object becomes a **static object**: the plain model, solid and
-  climbable, created by each player's game. Doors, ladders, wells, levers, placed
-  targets and recoloured objects are kept as normal (networked) objects
-  automatically.
-- A static object only has its model. Lights that switch on, fire and smoke,
-  sounds, things that can be destroyed, and actions of the object are gone. If an
-  object needs any of this, make it networked: add its type to `networked` in
-  `config.json` (its class name, or a pattern like `"*Lamp*"`), or use the Editor mode below.
-- Recoloured objects (same model, other texture) stay networked so they keep their
-  colour. If the plain model colour is fine, add `"!@retextured"` (or
-  `"!<type>"` for single types) to save the network load.
-- **Editor mode** (`"spawnMode": "editor"`, for one map in `maps[]` or globally):
-  the map is spawned exactly as built. In the Editor, objects can be switched
-  between "static object" and "config object". Static objects stay static, every
-  config object becomes networked. Use this when you want to decide per object;
-  keep the number of config objects low, every one of them costs network traffic
-  for every player near it.
-- Climbing, vaulting and walking work on static and networked objects alike.
+- A fast vehicle or aircraft makes no zone, so the server does no per-object work for it. The
+  only costs are the once-per-second player evaluation and, at most, the queue of objects that
+  other players or its own earlier slow phase left behind.
+- A player who speeds up keeps the objects networked for `releaseDelay`; nothing is deleted
+  while a car drives through the area, and nothing is created for it.
+- Login: the player downloads and spawns local objects exactly as in section 8 and 9. The
+  zone opens `activateDelay` after the player is alive and slow; promotion then replaces what
+  is around the player, nearest first, in the background.
+- A player who teleports or respawns gets a new zone there; the old area is released after
+  `releaseDelay`.
 
-The README sections "What it does", "Networked rules" and the config table, and
-`workshop.txt`, are updated to say "static" instead of "local". The config table
-gets `configVersion` ("written by the mod, do not change it"), and the update notes
-say: on the first start of this version the server adds `@retextured` to the
-`networked` list, rewrites `config.json` and keeps the old file as
-`config.json.v1.bak`.
+### 13.7 Configuration
 
-### 13.9 Changes
+New fields, all with a zero value that means the default (5.2); no config migration is needed
+(missing = default), the `configVersion` stays as it is.
+
+| Field | Type | Meaning | `0` / missing means |
+|---|---|---|---|
+| `networkRadius` | float, m | zone radius of a player on foot (clamped 5..500) | 150 |
+| `vehicleRadius` | float, m | zone radius of a slow vehicle (clamped 5..500) | 40 |
+| `maxFootSpeed` | float, m/s | faster on foot: no zone | 6 |
+| `maxVehicleSpeed` | float, m/s | faster in a vehicle: no zone | 8 |
+| `maxHeight` | float, m | higher above the ground: no zone | 20 |
+| `maxNetworked` | int | most objects networked by proximity at one time | 6000 |
+| `proximityExclude` | array of rules | types that are never promoted (same pattern rules as 5.3, no `@` tokens); for performance tuning, e.g. non-solid plants | none |
+| `disableProximity` | bool | switch the feature off (objects stay local, climbing on them does not work) | feature on |
+
+With `debugLog` the server logs once per minute: players with a zone, networked objects now
+(and the cap), promotions and demotions in that minute, queue length, and the time spent in
+the update; and per type the number of objects promoted since start (the input for
+`proximityExclude`).
+
+### 13.8 Tests
+
+Server, headless (test players made with `CreatePlayer(NULL, ...)`, which the climb test
+accepted):
+- Zone rules: on foot slow, fast, in a vehicle slow and fast, high above the ground, dead:
+  zone or none, radius. Pure function over a player state record, tested with a table.
+- Grid index: objects found for a zone, none outside; rule networked, failed and excluded
+  objects are not in it.
+- Promotion: objects near a test player become networked (non-zero network id, same type and
+  position), their local copies are gone, order nearest first, budget per frame respected.
+- Demotion: after the player leaves, nothing changes before `releaseDelay`, then objects are
+  local again, the networked copies gone; objects near a second player stay.
+- Cap: with `maxNetworked` 5 and 20 candidates, 5 nearest are promoted, one warning.
+- Hashes and digest do not change with promotion; every object is in exactly one state with
+  exactly one copy.
+- Fast mover: a test player above `maxFootSpeed` or `maxHeight` promotes nothing.
+- Config: defaults, clamping, `disableProximity`, `proximityExclude`.
+- Protocol: the id lists round-trip, 500 per message, the full set on manifest request.
+
+Client, in game (the debug logging build of 13.1 is the tool for the climb checks):
+- Climb and vault onto objects that were local a moment ago, also from one part of an object
+  onto another; the server finds the climb (log line pairs agree).
+- No hole and no double at the swap in both directions (watch a wall while walking up to it
+  and away from it); no visible pop on stairs and objects the player stands on.
+- A car driven past a base at 50 km/h, a helicopter at 40 m, a sprint: no networked objects
+  appear (server log counters), nothing flickers.
+- Getting out of a car in the base: after `activateDelay` the base around becomes networked.
+- Login time and first-minute behaviour compared with the current release.
+- Zombies path around objects during swaps.
+
+### 13.9 Also found: model objects are misplaced by `CreateStaticObjectUsingP3D` (superseded by 13.10d)
+
+Measured on the headless server with the footprint of a downward ray scan: a model object
+created with `CreateStaticObjectUsingP3D(path, pos, ori, ...)` is not where its class twin is.
+The engine puts the model's bounding-box centre at `pos` and does not apply `ori` like
+`SetOrientation` does: a `Land_Container_1Bo` model appeared 1.21 m too high, a greenhouse 1.32 m
+high and 0.23 m aside. Calling `SetOrientation(ori)` and then `SetPosition(pos)` right after the
+creation gives exactly the class object's footprint (container, greenhouse and bar tap, same
+numbers). The Editor's own server loader does not do this for models.
+
+The `.p3d` entries the mod spawns today (server and client, 6.2 and 9.4) have this problem if the
+`.dze` stores the object's origin as `pos`. To decide with a real map that has model objects (the
+Editor shows where it placed them); then apply the same two calls at every
+`CreateStaticObjectUsingP3D` call of the mod, and to the networked copies of 13.4.
+
+### 13.10 Prototype first (done: 13.10a to 13.10d)
+
+The design stands on three claims that need measuring before the full implementation:
+1. Promotion on a live server: the cost of creating and deleting networked objects at the
+   planned rates (CPU per object, network load for a player in a dense area, time to finish a
+   promotion of everything within 40 m), which sets the per-frame budgets and the default
+   `maxNetworked`.
+2. The swap is not visible on the client in either direction (no hole, no double, nothing pops
+   under a player).
+3. A promoted object can be climbed in a connected game (the probes say networked objects can).
+
+The first implementation step is therefore a small prototype that promotes everything within
+`networkRadius` of every player on foot, with the budgets as constants and the messages of 13.5,
+and logs the numbers of 13.7; the user checks it in game before the rest (zone rules for
+vehicles and aircraft, config fields, tests) is built.
+
+### 13.10a Prototype check, 2026-10-04 (1.29 client, dedicated server, one player)
+
+Build `da91b22`: every living player on foot, radius 40 m, no config.
+
+- **Climbing works** on objects that were local before: the claim of 13.1 holds.
+- **Server cost is small.** From the server log (75 status lines): 211 promotions in the first
+  10 s after the player appeared, at most 466 objects networked at a time, never a queue, no
+  failed promotion, 24 to 180 ms of server time per 10 s window (below 2 percent of one core).
+  At 150 m the area is 14 times larger: expect several thousand objects, to be measured.
+- **40 m is too small:** the swap is too visible (flicker). The default grows to 150 m; objects
+  that swap far away are not seen swapping.
+- **Objects vanished** after the swap, for example `StaticObj_Sidewalk*`. Likely cause (not yet
+  confirmed): the client decides that the networked twin is present by type and position
+  (`NetworkedInstancePresent`); the map files hide original world objects (`hidden` counts in the
+  log, 60 and 23 for two maps) that the Editor replaced at the same positions. A hidden world
+  object has a network id, the same type and the same position, so the client takes it for the
+  twin and deletes its local copy: nothing is left. Fix: the server announces the **network id
+  of the twin** (13.5) and the client looks that id up.
+- **Zombies walk through non-networked walls.** Open. Not yet known whether this is new or was
+  always so for local objects (the release was only checked against buildings, which the default
+  rules network because of doors). To find out: the same wall with the released build, and
+  with this build outside of any zone.
+
+### 13.10b Second and third prototype checks, 2026-10-04
+
+- **Swaps work:** 373 swaps, none timed out, no displaced twin in a dense area (client counters).
+- **Zombies still walk through walls** with `experimentalNoPathgraph` (no path graph update after
+  a swap) and with `experimentalKeepLocalCopy` (no object deleted). So neither the update nor the
+  deletion is the cause. A control run with `disableProximity` decides whether the swapping
+  matters at all. Open.
+- **Model objects (`.p3d` entries) and items sit where the entry does not say.** The client logged
+  231 displaced twins, almost all models (plants, rocks, crates, tire piles) and two items
+  (`WaterBottle`, `FireExtinguisher`), 0.4 to 2 m off and rotated. Causes:
+  - `CreateStaticObjectUsingP3D` centres the model's bounding box on the position and does not
+    apply the orientation like `SetOrientation` (13.9). Reproduced on the headless server with the
+    same offsets (1.96 m for the bush of the log): the **server's** models, local or networked,
+    stand off their entry. Fix: `SetOrientation` and `SetPosition` after creation, on the server
+    and on the client, so both sides use the entry.
+  - A promoted item is simulated and settles on the ground (0.4 m up in the log); promoted
+    objects now get `DisableSimulation(true)`.
+  - Class objects get `SetPosition` after creation, as the Editor's loader does.
+  The client logs the first three displacements per model (`model placement:` lines) so the
+  client's own behaviour is visible.
+- Models and the entry position: whether the Editor stores the origin or the bounding-box centre
+  in `Position` for model objects is not known; the fix assumes the origin (the same meaning as for
+  class objects). If a builder sees models shifted against the Editor, this is the place to look.
+
+### 13.10c Model objects: radians, scale, networked twins (2026-10-05)
+
+- **Orientation of model objects is in radians.** The `.dze` values of `.p3d` entries are multiples of
+  pi/10 (0.314, 0.628, 1.257, -2.827); `CreateStaticObjectUsingP3D` takes radians (yaw 40 comes out as
+  131.83 degrees, which is 40 rad), and the twins' degrees in the client log equal the entry times 180/pi
+  (entry 0.157, twin 8.9999). Class objects use degrees. Builds 4 to 9 passed the radians to
+  `SetOrientation` as degrees and turned every model almost to yaw 0. Fixed: `DZOMS_Placement.ApplyModel`.
+- **`SetOrientation` and `SetYawPitchRoll` reset the scale to 1.** `SetTransform` with a scaled rotation
+  matrix sets position, orientation and scale together and keeps all three.
+- **Scale is not replicated.** A networked twin reaches the client with scale 1. The client gives it the
+  entry's scale, and watches the announced twins (a twin that streams in after a login, or re-enters the
+  network bubble, shows up unscaled again).
+- **A networked model reaches the client at its creation transform**: the server's later correction is not
+  replicated. The server's engine creates a model off its entry (bounding box centre, 0.1 to 10 m in the
+  log); the client puts the twin at the entry (position, yaw, scale). The client's own engine creates local
+  models at the entry within 2 cm, so the entry is the origin.
+
+### 13.10d Model positions: the Editor shows the origin the engine gave (2026-10-05)
+
+In the Editor the crate `misc_woodencrate_3x` shows `6906.566 266.867 9901.654`, orientation 18; the file
+holds `6906.512 266.159 9901.661`, yaw 0.314 rad. `CreateStaticObjectUsingP3D` puts the model's **base** on
+the position it is given (the origin ends up 0.7 m higher for the crate, 1.2 m for a container) and takes
+radians; the Editor shows the resulting origin. So the position in the file is not the origin, and
+placing the origin at the file's position (builds 4 to 10) sank models.
+Rule now: the server creates a model as the file says (the engine's own placement, scale as a creation
+parameter), then **rewrites the entry to the object's actual origin and yaw in degrees** and marks it
+`FLAG_ORIGIN` (data entry flag 2). Clients place their local copy at that origin exactly
+(`DZOMS_Placement.Apply`), respawns on the server do the same, and a networked twin (created by the same
+call) already stands there. Batch data and hashes change once for maps with models.
+
+### 13.10e Zombies right after a login (release candidate, 2026-10-05)
+
+Driving and flying past work. Right after a login inside a mapped area, zombies that spawn run through
+walls for a while; it fixes itself after some time. At a login the zone opens after 2 s and a few hundred
+objects are swapped within seconds (378 in the log, 0.15 to 0.5 s of server time per minute). The
+engine rebuilds the path graph for the new objects (`ECE_UPDATEPATHGRAPH`) asynchronously, while the
+server deleted the old local copy, with its obstacle, at once: there was a window without any obstacle.
+Now the server keeps the old copy for `OLD_COPY_DELAY_MS` (5 s) after a swap, in both directions (the
+networked copy is also deleted late when an object goes back to local), so the new copy's obstacle is in
+before the old one goes. The delay is a guess and a constant; a log with the zombie behaviour decides.
+Also seen: the types promoted most (`debugLog` report) include plants (`bldr_plnt_*`): nobody climbs those;
+`proximityExclude` is for them.
+
+### 13.10f Several players
+
+One zone per qualifying player; the zones add up: an object is promoted when it is inside any zone, queued
+by its distance to the nearest zone (one global queue, `CREATES_PER_FRAME` per frame), and released only
+when it has been outside every zone for `RELEASE_DELAY_MS` and farther than 1.5 radii from all of them.
+`maxNetworked` is global (the objects nearest to any player win). The activation delay is tracked per
+player by the BI id (`PlayerIdentity.GetId()`); an earlier version used the position in the player list,
+which moves when players join or leave. Every swap is announced to all clients; a client that never gets
+the networked copy (outside its network range) keeps its local copy and drops the swap after 10 s.
+
+### 13.11 Where it lives
 
 | Where | Change |
 |---|---|
-| `DZOMS_Config`, `DZOMS_MapEntry` | `spawnMode` global and per map, normalized (13.3); `@retextured` in the default `networked` list; `configVersion`, `CURRENT_VERSION = 2`, migration with backup and write-back, `MigrateTo2` (13.5) |
-| `DZOMS_NetworkRules` | `@retextured` / `!@retextured` (13.4); "local" -> "static" in names and messages |
-| `DZOMS_TypeName` | spawnable model path for a class (13.6), next to `ModelPath()` |
-| `DZOMS_ServerWorld` | decision 13.6, entry type = model path for static objects, `ProcessMarkedObjectsForPathgraphUpdate()` after loading; `SpawnOnServer` no longer creates local class objects except the probe |
-| report (`DZOMS_MapReport`) | `static`, `no model`, `(editor)` (13.7) |
-| `DZOMS_ClientWorld` | nothing for spawning; the class branch of `SpawnLocal` remains for proxies only |
-| docs | DESIGN sections 3, 5, 6.2, 9.4, 11 rewritten from this section, then this section removed; README (13.8), `workshop.txt` |
-
-### 13.10 Tests
-
-Server, headless:
-
-- Config version: a missing file is written with `configVersion` 2. A version 1
-  file (no `configVersion`) with a custom `networked` list is migrated:
-  `@retextured` first, the other rules unchanged and in order, `configVersion` 2,
-  backup `config.json.v1.bak` identical to the original, `0` fields still `0` in
-  the written file. A version 1 file that already has `!@retextured` only gets the
-  version. A version 2 file is not written (unchanged modification time). A version
-  3 file logs an error, is used as it is and is not written. Broken JSON is not
-  written (as before). A second start after a migration changes nothing.
-- `spawnMode`: missing, `""`, `"static"`, `"STATIC"`, `"editor"`, unknown (config
-  error, default); per-map value overrides the global one, `""` inherits.
-- Static mode: a class without rule becomes a batch entry with its model path and
-  no networked flag; a networked rule keeps it a class with the flag; a class
-  without `model` becomes networked and is counted as `no model`.
-- Editor mode: every class object is networked whatever the rules say; `.p3d`
-  objects still follow the rules.
-- `@retextured`: a colour variant matches (with inherited `hiddenSelections`), its
-  base class without textures does not, `!@retextured` overrides, `.p3d` never
-  matches.
-- The probe object of `@doors` & co. is gone after loading: no object without a
-  network id left at a static entry's position except the static object itself.
-- Hashes are stable over two starts and change when `spawnMode` changes.
-
-Client, in game:
-
-- Climb and vault onto static objects converted from classes (`HMMV_Wreck`, walls,
-  containers), also from one part of an object onto a higher part.
-- Every static object appears once (no network copy on top, 13.2).
-- Recoloured objects keep their colour (networked) and show the model colour with
-  `!@retextured`.
-- Zombies path around static objects.
-- An `"editor"` map: Editor static objects are static, config objects networked.
+| new `DZOMS_Proximity` (3_Game) | zone rules, grid index, states, update, queue (13.3, 13.4) |
+| `DZOMS_ServerWorld` | owns it; promote and demote (13.4), full state on manifest request |
+| `DZOMS_Rpc`, `DZOMS_Manifest` | the two messages, protocol version 2 |
+| `DZOMS_ClientWorld` | id set, no local spawn for announced ids, pending swaps, local respawn (13.5) |
+| `DZOMS_Config` | the fields of 13.7, normalization |
+| `MissionServer` hook (5_Mission) | `OnUpdate()` drives the timer |
+| `DZOMS_Placement`, `DZOMS_IdList` (3_Game) | one-step placement with `SetTransform` (13.10c); the id lists of 13.5 |
+| spawning of model objects | engine placement, entries rewritten to the origin with `FLAG_ORIGIN` (13.10d) |
+| docs | README (what "networked" means now, the new fields, why climbing needs it); `workshop.txt` |
 
 ## 14. Enforce Script pitfalls (verified on 1.29)
 
@@ -959,6 +1100,14 @@ Client, in game:
 - `TickCount(prev)` returns microseconds (calibrated against the UTC clock).
 - Assigning `new` to a function parameter fails to compile ("not strong ref"):
   create objects in locals or store them in a `ref` container first.
+- `Print()` cuts a line at 256 characters (the rest is lost silently): keep log lines short.
+- `CreateStaticObjectUsingP3D` puts the model's bounding-box centre at the position and does not
+  apply the orientation like `SetOrientation`: call `SetOrientation` and `SetPosition` after it
+  (13.9).
+- For a connected player the server's climb test ignores local objects (13.1). A headless test
+  with `CreatePlayer(NULL, ...)` does not show this: it finds them.
+- `Object.GetCollisionBox()` of class objects is not a usable footprint (zero width on one axis
+  for `Land_Container_1Bo`); measure with ray casts instead.
 
 ## 15. Classes
 
@@ -977,7 +1126,11 @@ Client, in game:
 | 4_World | `modded BuildingBase` | counts `AddAction()` calls into `m_DZOMS_ActionCount` |
 | 3_Game | `DZOMS_BatchBuilder` | cells and batches (6.3) |
 | 3_Game | `DZOMS_ServerWorld` | load maps, spawn, suppress, build batches, answer requests |
-| 3_Game | `DZOMS_ClientWorld` | download, cache use, batch states, spawning, proxies |
+| 3_Game | `DZOMS_ClientWorld` | download, cache use, batch states, spawning, proxies, swapping local copies for networked twins (scale, model placement) |
+| 3_Game | `DZOMS_Proximity`, `DZOMS_ProximityConfig`, `DZOMS_Zone`, `DZOMS_PlayerState` | zone rules, grid index, promotion and demotion queues, cap, report (section 13) |
+| 3_Game | `DZOMS_IdList` | object ids (batch, index, network id) of the two proximity messages |
+| 3_Game | `DZOMS_Placement` | position, orientation and scale in one step (`SetTransform`); model orientation in radians |
+| 5_Mission | `DZOMS_PlayerStates` | collects the player states (position, speed, vehicle, height) for the zone rules |
 | 3_Game | `modded DayZGame` | owns the server or client world, dispatches RPCs to it |
 | 5_Mission | `modded MissionServer` | create the server world in `OnInit` (with a `DZOMS_ObjectProbeWorld`), rate limit cleanup in `InvokeOnDisconnect` |
 | 5_Mission | `modded MissionGameplay` | create the client world in `OnInit`, update it in `OnUpdate`, destroy it in `OnMissionFinish` |

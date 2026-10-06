@@ -56,6 +56,35 @@ class DZOMS_ClientWorld
 	static const int PROXY_INTERVAL_MS = 1000;
 	static const int PROXIES_PER_FRAME = 50;
 	static const float PROXY_HYSTERESIS = 50;
+	// networked copies announced by the server (DESIGN 13.5)
+	static const int SWAP_TIMEOUT_MS = 10000;
+	static const int SWAPS_PER_FRAME = 20;
+	static const int RESPAWNS_PER_FRAME = 50;
+	static const int ID_FACTOR = 1024;
+	static const int MAX_ANNOUNCED = 4000;
+	static const int WATCHED_PER_FRAME = 20;
+
+	int m_MaxAnnounced = MAX_ANNOUNCED;	// tests lower it
+	protected ref map<int, bool> m_NetworkedIds = new map<int, bool>();	// key batch * ID_FACTOR + index
+	protected ref array<int> m_PendingKeys = new array<int>();
+	protected ref array<int> m_PendingSince = new array<int>();
+	protected ref array<int> m_PendingLow = new array<int>();	// network id of the announced twin
+	protected ref array<int> m_PendingHigh = new array<int>();
+	protected ref array<int> m_RespawnKeys = new array<int>();
+	protected int m_SwapTimeouts;
+	protected int m_SwapsDone;
+	protected int m_TwinMismatch;
+	protected int m_ScaleMismatch;
+	protected int m_ScaleFixed;
+	protected int m_TwinFixed;
+	// announced ids whose twin must carry the entry's scale (the scale is not replicated, and a twin that
+	// streams in later, e.g. after a login, shows up with scale 1)
+	protected ref array<int> m_WatchKeys = new array<int>();
+	protected ref array<int> m_WatchLow = new array<int>();
+	protected ref array<int> m_WatchHigh = new array<int>();
+	protected int m_WatchCursor;
+	protected ref map<string, int> m_TwinLogged = new map<string, int>();
+	protected int m_AnnounceDropped;
 
 	// test seam: when set, requests are recorded here instead of being sent
 	bool m_Offline;
@@ -215,6 +244,9 @@ class DZOMS_ClientWorld
 		}
 		UpdateDistances(nowMs);
 		SpawnStep();
+		SwapStep(nowMs);
+		WatchStep();
+		RespawnStep();
 		UnloadStep();
 		ProxyStep(nowMs);
 		LogStatus(nowMs);
@@ -257,6 +289,10 @@ class DZOMS_ClientWorld
 			}
 		}
 		DZOMS_Log.Info("status: camera " + m_Camera.ToString() + ", " + received.ToString() + "/" + m_Batches.Count().ToString() + " batches received, nearest " + Math.Round(nearest).ToString() + " m away (view distance " + Math.Round(m_Manifest.viewDistance).ToString() + " m), " + loaded.ToString() + " loaded, " + objects.ToString() + " local objects alive");
+		string swapLine = "swaps: " + m_SwapsDone.ToString() + " done, " + m_SwapTimeouts.ToString() + " timed out, " + m_PendingKeys.Count().ToString() + " pending, " + m_NetworkedIds.Count().ToString() + " announced";
+		string fixLine = "swaps: " + m_TwinMismatch.ToString() + " displaced twins, " + m_ScaleMismatch.ToString() + " scale mismatches, " + m_ScaleFixed.ToString() + " twins scaled, " + m_TwinFixed.ToString() + " model twins placed";
+		DZOMS_Log.Info(swapLine);
+		DZOMS_Log.Info(fixLine);
 	}
 
 	bool IsFailedType(string type)
@@ -274,17 +310,30 @@ class DZOMS_ClientWorld
 	}
 
 	// local object as the client spawns it (DESIGN.md 9.4); NULL if the type does not exist
-	static Object SpawnLocal(string type, vector pos, vector ori, float scale)
+	static Object SpawnLocal(string type, vector pos, vector ori, float scale, int flags)
 	{
 		if (DZOMS_TypeName.IsModel(type))
 		{
-			return g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			if ((flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+			{
+				return g_Game.CreateStaticObjectUsingP3D(type, pos, ori, scale, true);
+			}
+			// origin data from the server: the object stands exactly where the server's object stands
+			Object model = g_Game.CreateStaticObjectUsingP3D(type, pos, ori * Math.DEG2RAD, scale, true);
+			if (model)
+			{
+				DZOMS_Placement.Apply(model, pos, ori, scale);
+			}
+			return model;
 		}
 		Object obj = g_Game.CreateObjectEx(type, pos, ECE_LOCAL | ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME);
 		if (!obj)
 		{
 			return null;
 		}
+		// the engine may move a new object (terrain, water); the entry says where it stands
+		// (the Editor's loader does the same)
+		obj.SetPosition(pos);
 		obj.SetOrientation(ori);
 		if (scale != 1)
 		{
@@ -398,7 +447,7 @@ class DZOMS_ClientWorld
 			{
 				int i = cb.cursor;
 				cb.cursor++;
-				if (cb.data.IsNetworked(i) || cb.objects.Get(i))
+				if (cb.data.IsNetworked(i) || cb.objects.Get(i) || m_NetworkedIds.Contains(pick * ID_FACTOR + i))
 				{
 					continue;
 				}
@@ -408,7 +457,7 @@ class DZOMS_ClientWorld
 					continue;
 				}
 				budget--;
-				Object o = SpawnLocal(type, cb.data.positions.Get(i), cb.data.orientations.Get(i), cb.data.scales.Get(i));
+				Object o = SpawnLocal(type, cb.data.positions.Get(i), cb.data.orientations.Get(i), cb.data.scales.Get(i), cb.data.flags.Get(i));
 				if (o)
 				{
 					cb.objects.Set(i, o);
@@ -519,7 +568,7 @@ class DZOMS_ClientWorld
 		{
 			if (d > proxyDistance + PROXY_HYSTERESIS && !m_FailedTypes.Contains(type) && !NetworkedInstancePresent(type, pos, null))
 			{
-				Object created = SpawnLocal(type, pos, cb.data.orientations.Get(entry), cb.data.scales.Get(entry));
+				Object created = SpawnLocal(type, pos, cb.data.orientations.Get(entry), cb.data.scales.Get(entry), cb.data.flags.Get(entry));
 				if (created)
 				{
 					cb.proxies.Set(entry, created);
@@ -653,6 +702,385 @@ class DZOMS_ClientWorld
 				return;
 			}
 			HandleBatch(b, g_Game.GetTime());
+		}
+		else if (rpcType == DZOMS_Rpc.OBJECTS_NETWORKED || rpcType == DZOMS_Rpc.OBJECTS_LOCAL)
+		{
+			DZOMS_IdList ids = new DZOMS_IdList();
+			if (!ctx.Read(ids) || !ids)
+			{
+				return;
+			}
+			if (rpcType == DZOMS_Rpc.OBJECTS_NETWORKED)
+			{
+				HandleNetworked(ids, g_Game.GetTime());
+			}
+			else
+			{
+				HandleLocal(ids, g_Game.GetTime());
+			}
+		}
+	}
+
+	int GetNetworkedIdCount()
+	{
+		return m_NetworkedIds.Count();
+	}
+
+	bool IsAnnouncedNetworked(int batch, int index)
+	{
+		return m_NetworkedIds.Contains(batch * ID_FACTOR + index);
+	}
+
+	int GetPendingSwapCount()
+	{
+		return m_PendingKeys.Count();
+	}
+
+	int GetSwapsDone()
+	{
+		return m_SwapsDone;
+	}
+
+	// twins that exist but are not where their entry says
+	int GetTwinMismatchCount()
+	{
+		return m_TwinMismatch;
+	}
+
+	// model twins that were put at their entry
+	int GetTwinFixedCount()
+	{
+		return m_TwinFixed;
+	}
+
+	// twins that were given their entry's scale
+	int GetScaleFixedCount()
+	{
+		return m_ScaleFixed;
+	}
+
+	// twins that exist at the right place but with another scale than their entry
+	int GetScaleMismatchCount()
+	{
+		return m_ScaleMismatch;
+	}
+
+	int GetSwapTimeoutCount()
+	{
+		return m_SwapTimeouts;
+	}
+
+	int GetAnnounceDropped()
+	{
+		return m_AnnounceDropped;
+	}
+
+	// valid when the batch exists and the index fits (the real size once the batch is received)
+	protected bool ValidId(int batch, int index)
+	{
+		if (batch < 0 || batch >= m_Batches.Count() || index < 0 || index >= ID_FACTOR)
+		{
+			return false;
+		}
+		DZOMS_ClientBatch cb = m_Batches.Get(batch);
+		if (cb.data && index >= cb.data.Count())
+		{
+			return false;
+		}
+		return true;
+	}
+
+	// these objects now have a networked copy: no local copy any more, as soon as the twin is here
+	void HandleNetworked(DZOMS_IdList ids, int nowMs)
+	{
+		if (!ids || !ids.IsValid() || !ids.HasNetIds())
+		{
+			return;
+		}
+		for (int n = 0; n < ids.Count(); n++)
+		{
+			int batch = ids.batch.Get(n);
+			int index = ids.index.Get(n);
+			if (!ValidId(batch, index))
+			{
+				continue;
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			int key = batch * ID_FACTOR + index;
+			if (cb.data && cb.data.IsNetworked(index))
+			{
+				continue;
+			}
+			if (m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			if (m_NetworkedIds.Count() >= m_MaxAnnounced)
+			{
+				m_AnnounceDropped++;
+				continue;
+			}
+			m_NetworkedIds.Set(key, true);
+			m_WatchKeys.Insert(key);
+			m_WatchLow.Insert(ids.netLow.Get(n));
+			m_WatchHigh.Insert(ids.netHigh.Get(n));
+			int queued = m_RespawnKeys.Find(key);
+			if (queued >= 0)
+			{
+				m_RespawnKeys.RemoveOrdered(queued);
+			}
+			if (cb.data && cb.objects.Get(index))
+			{
+				m_PendingKeys.Insert(key);
+				m_PendingSince.Insert(nowMs);
+				m_PendingLow.Insert(ids.netLow.Get(n));
+				m_PendingHigh.Insert(ids.netHigh.Get(n));
+			}
+		}
+	}
+
+	// these objects are local again: spawn the local copy where the batch is spawned
+	void HandleLocal(DZOMS_IdList ids, int nowMs)
+	{
+		if (!ids || !ids.IsValid())
+		{
+			return;
+		}
+		for (int n = 0; n < ids.Count(); n++)
+		{
+			int batch = ids.batch.Get(n);
+			int index = ids.index.Get(n);
+			if (!ValidId(batch, index))
+			{
+				continue;
+			}
+			int key = batch * ID_FACTOR + index;
+			if (!m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			m_NetworkedIds.Remove(key);
+			RemoveWatch(m_WatchKeys.Find(key));
+			int pending = m_PendingKeys.Find(key);
+			if (pending >= 0)
+			{
+				m_PendingKeys.RemoveOrdered(pending);
+				m_PendingSince.RemoveOrdered(pending);
+				m_PendingLow.RemoveOrdered(pending);
+				m_PendingHigh.RemoveOrdered(pending);
+			}
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			if (!cb.data || cb.objects.Get(index))
+			{
+				continue;
+			}
+			bool spawned = cb.state == DZOMS_ClientBatch.LOADED || (cb.state == DZOMS_ClientBatch.LOADING && cb.cursor > index);
+			if (spawned)
+			{
+				m_RespawnKeys.Insert(key);
+			}
+		}
+	}
+
+	protected void RemoveWatch(int at)
+	{
+		if (at < 0)
+		{
+			return;
+		}
+		m_WatchKeys.RemoveOrdered(at);
+		m_WatchLow.RemoveOrdered(at);
+		m_WatchHigh.RemoveOrdered(at);
+	}
+
+	// keeps the twins of scaled entries at the entry's scale, a few per frame, round robin
+	protected void WatchStep()
+	{
+		int budget = Math.Min(WATCHED_PER_FRAME, m_WatchKeys.Count());
+		while (budget > 0 && m_WatchKeys.Count() > 0)
+		{
+			budget--;
+			if (m_WatchCursor >= m_WatchKeys.Count())
+			{
+				m_WatchCursor = 0;
+			}
+			int key = m_WatchKeys.Get(m_WatchCursor);
+			int batch = key / ID_FACTOR;
+			int index = key - batch * ID_FACTOR;
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			if (!cb.data)
+			{
+				m_WatchCursor++;
+				continue;
+			}
+			float scale = cb.data.scales.Get(index);
+			if (Math.AbsFloat(scale - 1) < 0.01 && !DZOMS_TypeName.IsModel(cb.data.GetType(index)))
+			{
+				RemoveWatch(m_WatchCursor);
+				continue;
+			}
+			Object twin = g_Game.GetObjectByNetworkId(m_WatchLow.Get(m_WatchCursor), m_WatchHigh.Get(m_WatchCursor));
+			m_WatchCursor++;
+			if (!twin)
+			{
+				continue;
+			}
+			string type = cb.data.GetType(index);
+			string want = DZOMS_TypeName.Of(type);
+			if (DZOMS_TypeName.Of(twin.GetType()) == want || DZOMS_TypeName.Of(twin.GetShapeName()) == want)
+			{
+				FixTwin(twin, type, cb.data.positions.Get(index), cb.data.orientations.Get(index), scale, cb.data.flags.Get(index));
+			}
+		}
+	}
+
+	// pending swaps: delete the local copy once the networked twin exists, give up after SWAP_TIMEOUT_MS
+	protected void SwapStep(int nowMs)
+	{
+		int budget = Math.Min(SWAPS_PER_FRAME, m_PendingKeys.Count());
+		while (budget > 0 && m_PendingKeys.Count() > 0)
+		{
+			budget--;
+			int key = m_PendingKeys.Get(0);
+			int since = m_PendingSince.Get(0);
+			int twinLow = m_PendingLow.Get(0);
+			int twinHigh = m_PendingHigh.Get(0);
+			m_PendingKeys.RemoveOrdered(0);
+			m_PendingSince.RemoveOrdered(0);
+			m_PendingLow.RemoveOrdered(0);
+			m_PendingHigh.RemoveOrdered(0);
+			int batch = key / ID_FACTOR;
+			int index = key - batch * ID_FACTOR;
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			Object copy = cb.objects.Get(index);
+			if (!copy)
+			{
+				continue;
+			}
+			if (TwinPresent(twinLow, twinHigh, cb.data.GetType(index), cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), cb.data.flags.Get(index), copy))
+			{
+				g_Game.ObjectDelete(copy);
+				cb.objects.Set(index, null);
+				m_SwapsDone++;
+				continue;
+			}
+			if (nowMs - since >= SWAP_TIMEOUT_MS)
+			{
+				m_SwapTimeouts++;
+				continue;
+			}
+			m_PendingKeys.Insert(key);
+			m_PendingSince.Insert(since);
+			m_PendingLow.Insert(twinLow);
+			m_PendingHigh.Insert(twinHigh);
+		}
+	}
+
+	// the announced twin: the object with that network id, of the entry's type, at the entry's position.
+	// Not a search by type and position: a hidden world object at the same place would pass that.
+	protected bool TwinPresent(int low, int high, string type, vector pos, vector ori, float scale, int flags, Object copy)
+	{
+		Object twin = g_Game.GetObjectByNetworkId(low, high);
+		if (!twin || twin == copy)
+		{
+			return false;
+		}
+		string want = DZOMS_TypeName.Of(type);
+		if (DZOMS_TypeName.Of(twin.GetType()) != want && DZOMS_TypeName.Of(twin.GetShapeName()) != want)
+		{
+			return false;
+		}
+		if (FixTwin(twin, type, pos, ori, scale, flags))
+		{
+			return true;
+		}
+		float off = vector.Distance(twin.GetPosition(), pos);
+		string what = "twin of " + type;
+		if (off > 0.05)
+		{
+			m_TwinMismatch++;
+			what = what + " is " + off.ToString() + " m from its entry, twin " + twin.GetPosition().ToString() + ", entry " + pos.ToString();
+		}
+		else
+		{
+			m_ScaleMismatch++;
+			what = what + " keeps scale " + twin.GetScale().ToString() + ", the entry " + scale.ToString();
+		}
+		int logged = 0;
+		m_TwinLogged.Find(type, logged);
+		if (logged < 3)
+		{
+			m_TwinLogged.Set(type, logged + 1);
+			DZOMS_Log.Warn("swap: " + what);
+		}
+		return false;
+	}
+
+	// The server's networked objects reach the client with their creation transform. Scale is not
+	// replicated at all, and a model object (CreateStaticObjectUsingP3D) is created off its entry by the
+	// server's engine (found in game: 0.1 to 10 m). The client puts the twin where and as big as the entry
+	// says; the server's collision is at the entry already. True when the twin matches the entry.
+	protected bool FixTwin(Object twin, string type, vector pos, vector ori, float scale, int flags)
+	{
+		bool model = DZOMS_TypeName.IsModel(type);
+		float off = vector.Distance(twin.GetPosition(), pos);
+		vector wantOri = ori;
+		if (model && (flags & DZOMS_Batch.FLAG_ORIGIN) == 0)
+		{
+			wantOri = DZOMS_Placement.ModelOrientation(ori);
+		}
+		float yawOff = Math.AbsFloat(twin.GetOrientation()[0] - wantOri[0]);
+		if (yawOff > 180)
+		{
+			yawOff = 360 - yawOff;
+		}
+		bool scaleOff = Math.AbsFloat(twin.GetScale() - scale) > 0.01;
+		if (model && (off > 0.01 || yawOff > 0.5 || scaleOff))
+		{
+			DZOMS_Placement.Apply(twin, pos, wantOri, scale);
+			m_TwinFixed++;
+		}
+		else if (!model && off <= 0.05 && scaleOff)
+		{
+			twin.SetScale(scale);
+			m_ScaleFixed++;
+		}
+		return vector.Distance(twin.GetPosition(), pos) <= 0.05 && Math.AbsFloat(twin.GetScale() - scale) <= 0.01;
+	}
+
+	protected void RespawnStep()
+	{
+		int budget = RESPAWNS_PER_FRAME;
+		while (budget > 0 && m_RespawnKeys.Count() > 0)
+		{
+			int key = m_RespawnKeys.Get(0);
+			m_RespawnKeys.RemoveOrdered(0);
+			int batch = key / ID_FACTOR;
+			int index = key - batch * ID_FACTOR;
+			DZOMS_ClientBatch cb = m_Batches.Get(batch);
+			if (!cb.data || cb.objects.Get(index) || m_NetworkedIds.Contains(key))
+			{
+				continue;
+			}
+			if (cb.state != DZOMS_ClientBatch.LOADED && cb.state != DZOMS_ClientBatch.LOADING)
+			{
+				continue;
+			}
+			string type = cb.data.GetType(index);
+			if (m_FailedTypes.Contains(type))
+			{
+				continue;
+			}
+			budget--;
+			Object o = SpawnLocal(type, cb.data.positions.Get(index), cb.data.orientations.Get(index), cb.data.scales.Get(index), cb.data.flags.Get(index));
+			if (o)
+			{
+				cb.objects.Set(index, o);
+			}
+			else
+			{
+				MarkFailed(type);
+			}
 		}
 	}
 
