@@ -184,13 +184,13 @@ class DZOMS_Test_Config
 		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "old file: not rewritten");
 		DZOMS_T.Check(!FileExist(dir + "/config.json.v1.bak"), "old file: no backup");
 
-		// experiment: update the path graph around a player who arrives
-		dir = CaseDir("pathgraph_arrival");
+		// experiments for the zombie problem: off by default
+		dir = CaseDir("experiments");
 		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(!c.experimentalPathgraphArrival, "path graph update on arrival is off by default");
-		WriteText(dir + "/config.json", "{ \"experimentalPathgraphArrival\": true }");
+		DZOMS_T.Check(!c.experimentalNoPathgraph && !c.experimentalKeepLocalCopy, "experiments are off by default");
+		WriteText(dir + "/config.json", "{ \"experimentalNoPathgraph\": true, \"experimentalKeepLocalCopy\": true }");
 		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(c.experimentalPathgraphArrival, "path graph update on arrival can be switched on");
+		DZOMS_T.Check(c.experimentalNoPathgraph && c.experimentalKeepLocalCopy, "experiments can be switched on");
 
 		// proximity networking switch
 		dir = CaseDir("proximity_off");

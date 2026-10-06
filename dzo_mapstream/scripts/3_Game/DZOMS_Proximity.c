@@ -50,8 +50,6 @@ class DZOMS_Proximity
 	static const int RELEASE_DELAY_MS = 30000;
 	static const int ACTIVATE_DELAY_MS = 2000;
 	static const int STATUS_INTERVAL_MS = 60000;
-	static const float REGION_STEP = 100;
-	static const float REGION_HALF_EXTENT = 100;
 	static const int RETRY_DELAY_MS = 60000;
 	static const int CAP_WARN_INTERVAL_MS = 60000;
 	static const int SWAP_DELAY_MS = 500;
@@ -64,8 +62,6 @@ class DZOMS_Proximity
 	int m_ActivateDelayMs = ACTIVATE_DELAY_MS;	// tests set it to 0
 	protected ref map<string, int> m_Since = new map<string, int>();	// player id -> since when the player qualifies for a zone
 	protected ref array<int> m_RetryAt = new array<int>();	// per object: no new attempt before this time
-	protected ref map<string, vector> m_RegionPos = new map<string, vector>();	// per player: where the path graph was last updated
-	protected int m_RegionUpdates;
 	protected int m_CapHits;
 	protected int m_LastCapWarn;
 	protected ref map<int, ref array<int>> m_Cells = new map<int, ref array<int>>();
@@ -170,11 +166,6 @@ class DZOMS_Proximity
 		return m_Cfg;
 	}
 
-	int GetRegionUpdates()
-	{
-		return m_RegionUpdates;
-	}
-
 	int GetCapHits()
 	{
 		return m_CapHits;
@@ -231,7 +222,7 @@ class DZOMS_Proximity
 		{
 			return "";
 		}
-		return "proximity: " + m_Networked.Count().ToString() + " of at most " + m_Cfg.maxNetworked.ToString() + " networked, queue " + GetQueueLength().ToString() + ", +" + promotions.ToString() + " -" + demotions.ToString() + " failed " + failures.ToString() + " in the last minute, " + usedMs.ToString() + " ms used, " + m_RegionUpdates.ToString() + " path graph updates";
+		return "proximity: " + m_Networked.Count().ToString() + " of at most " + m_Cfg.maxNetworked.ToString() + " networked, queue " + GetQueueLength().ToString() + ", +" + promotions.ToString() + " -" + demotions.ToString() + " failed " + failures.ToString() + " in the last minute, " + usedMs.ToString() + " ms used";
 	}
 
 	// the types promoted most often since start, one short line each (to decide on proximityExclude)
@@ -295,21 +286,6 @@ class DZOMS_Proximity
 		return m_Failures;
 	}
 
-	// the path graph around a player who arrives (or has moved REGION_STEP since): the engine builds it for
-	// the objects of the map lazily, and zombies ignore walls until it has
-	protected void UpdatePathgraphAround(DZOMS_PlayerState ps, float radius)
-	{
-		vector last;
-		if (m_RegionPos.Find(ps.id, last) && vector.Distance(last, ps.pos) < REGION_STEP)
-		{
-			return;
-		}
-		m_RegionPos.Set(ps.id, ps.pos);
-		m_RegionUpdates++;
-		float half = Math.Min(radius, REGION_HALF_EXTENT);
-		g_Game.UpdatePathgraphRegion(Vector(ps.pos[0] - half, ps.pos[1], ps.pos[2] - half), Vector(ps.pos[0] + half, ps.pos[1], ps.pos[2] + half));
-	}
-
 	// builds the zones, queues promotions (nearest first) and demotions (farthest first); once per UPDATE_INTERVAL_MS
 	void Update(array<ref DZOMS_PlayerState> players, int nowMs)
 	{
@@ -347,10 +323,6 @@ class DZOMS_Proximity
 			{
 				zones.Insert(ps.pos);
 				radii.Insert(zone.radius);
-				if (m_World.GetConfig().experimentalPathgraphArrival)
-				{
-					UpdatePathgraphAround(ps, zone.radius);
-				}
 			}
 		}
 		m_Since = seenNow;
@@ -495,8 +467,11 @@ class DZOMS_Proximity
 			Object oldLocal;
 			if (m_World.PromoteKeepOld(pi, oldLocal))
 			{
-				m_DeleteObjects.Insert(oldLocal);
-				m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
+				if (oldLocal)
+				{
+					m_DeleteObjects.Insert(oldLocal);
+					m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
+				}
 				m_Networked.Insert(pi);
 				m_NeededAt.Set(pi, nowMs);
 				m_AnnounceIdx.Insert(pi);
@@ -556,7 +531,7 @@ class DZOMS_Proximity
 		{
 			m_World.BroadcastLocal(toLocal);
 		}
-		if (changed)
+		if (changed && !m_World.GetConfig().experimentalNoPathgraph)
 		{
 			g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
 		}

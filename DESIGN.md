@@ -1063,14 +1063,19 @@ player by the BI id (`PlayerIdentity.GetId()`); an earlier version used the posi
 which moves when players join or leave. Every swap is announced to all clients; a client that never gets
 the networked copy (outside its network range) keeps its local copy and drops the swap after 10 s.
 
-### 13.10g Zombies in an area with always networked buildings (release candidate 3)
+### 13.10g Zombies in an area with always networked buildings (release candidates 3 and 4)
 
 Zombies only respect walls once the player has left an area and come back, also at buildings with doors
-(networked by rule, never touched by the swaps). The path graph for the map objects seems to be built
-lazily around players, so the single `ProcessMarkedObjectsForPathgraphUpdate()` after loading (server start,
-nobody around) does not cover them. Experiment `experimentalPathgraphArrival` (default off): when a zone
-opens, and after the player has moved 100 m, `UpdatePathgraphRegion` is called for a square of at most
-100 m half extent around the player; the status line counts these updates. Remove or keep by the result.
+(networked by rule, never touched by the swaps). Candidate 4 updated the path graph by region around an
+arriving player: **zombies then ignored all buildings**. So an update of a region rebuilds it without the
+objects the mod spawned, unless they are marked again. Reading it back: the experiments of 13.10b ran
+before the one update after loading existed, so they proved nothing; with that update in place (builds 5 to
+9) zombies were fine, and the problems start with the runtime updates after swaps (the objects swapped
+get marked and processed; the region is rebuilt around them).
+Experiments (config, default off, removed once the cause is known): `experimentalNoPathgraph` (swapped copies
+get no `ECE_UPDATEPATHGRAPH`, the path graph is not touched after loading) and `experimentalKeepLocalCopy`
+(promotion keeps the server's local copy, which holds the obstacle of the load-time path graph, so deleting
+the old object cannot remove it). Climbing with a kept local copy beside the networked one is to be checked.
 
 ### 13.11 Where it lives
 
