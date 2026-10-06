@@ -1053,6 +1053,16 @@ before the old one goes. The delay is a guess and a constant; a log with the zom
 Also seen: the types promoted most (`debugLog` report) include plants (`bldr_plnt_*`): nobody climbs those;
 `proximityExclude` is for them.
 
+### 13.10f Several players
+
+One zone per qualifying player; the zones add up: an object is promoted when it is inside any zone, queued
+by its distance to the nearest zone (one global queue, `CREATES_PER_FRAME` per frame), and released only
+when it has been outside every zone for `RELEASE_DELAY_MS` and farther than 1.5 radii from all of them.
+`maxNetworked` is global (the objects nearest to any player win). The activation delay is tracked per
+player by the BI id (`PlayerIdentity.GetId()`); an earlier version used the position in the player list,
+which moves when players join or leave. Every swap is announced to all clients; a client that never gets
+the networked copy (outside its network range) keeps its local copy and drops the swap after 10 s.
+
 ### 13.11 Where it lives
 
 | Where | Change |

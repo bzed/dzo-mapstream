@@ -14,7 +14,13 @@ class DZOMS_PlayerStates
 				continue;
 			}
 			DZOMS_PlayerState state = new DZOMS_PlayerState();
-			state.id = i;
+			// the BI id is stable; a player without identity (should not happen) falls back to the list position
+			state.id = "index" + i.ToString();
+			PlayerIdentity identity = player.GetIdentity();
+			if (identity)
+			{
+				state.id = identity.GetId();
+			}
 			state.pos = player.GetPosition();
 			state.alive = player.IsAlive();
 			state.height = state.pos[1] - g_Game.SurfaceY(state.pos[0], state.pos[2]);

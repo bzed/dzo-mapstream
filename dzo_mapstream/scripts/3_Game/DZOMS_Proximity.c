@@ -2,7 +2,7 @@
 // pos and alive only.
 class DZOMS_PlayerState
 {
-	int id;
+	string id;	// stable per player (the BI id), not the position in the engine's player list
 	vector pos;
 	float speed;
 	bool inVehicle;
@@ -60,7 +60,7 @@ class DZOMS_Proximity
 	protected DZOMS_ServerWorld m_World;
 	protected ref DZOMS_ProximityConfig m_Cfg = new DZOMS_ProximityConfig();
 	int m_ActivateDelayMs = ACTIVATE_DELAY_MS;	// tests set it to 0
-	protected ref map<int, int> m_Since = new map<int, int>();	// player id -> since when the player qualifies for a zone
+	protected ref map<string, int> m_Since = new map<string, int>();	// player id -> since when the player qualifies for a zone
 	protected ref array<int> m_RetryAt = new array<int>();	// per object: no new attempt before this time
 	protected int m_CapHits;
 	protected int m_LastCapWarn;
@@ -299,7 +299,7 @@ class DZOMS_Proximity
 
 		array<vector> zones = new array<vector>();
 		array<float> radii = new array<float>();
-		map<int, int> seenNow = new map<int, int>();
+		map<string, int> seenNow = new map<string, int>();
 		for (int p = 0; p < players.Count(); p++)
 		{
 			DZOMS_PlayerState ps = players.Get(p);

@@ -436,7 +436,7 @@ class DZOMS_Test_Proximity
 	static DZOMS_PlayerState Player(int id, vector pos, bool alive)
 	{
 		DZOMS_PlayerState p = new DZOMS_PlayerState();
-		p.id = id;
+		p.id = "p" + id.ToString();
 		p.pos = pos;
 		p.alive = alive;
 		return p;
@@ -699,7 +699,7 @@ class DZOMS_Test_Proximity
 	static DZOMS_PlayerState StateOf(int id, vector pos, float speed, bool vehicle, float height)
 	{
 		DZOMS_PlayerState p = new DZOMS_PlayerState();
-		p.id = id;
+		p.id = "p" + id.ToString();
 		p.pos = pos;
 		p.speed = speed;
 		p.inVehicle = vehicle;
@@ -850,6 +850,35 @@ class DZOMS_Test_Proximity
 		DZOMS_T.EqInt(w4.GetPromotedCount(), 0, "excluded types are never promoted (glob, any case)");
 		w4.Destroy();
 		w.Destroy();
+	}
+
+	// the activation delay follows the player's id, not the position in the list
+	static void RunPlayerOrder()
+	{
+		vector baseA = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -760";
+		vector baseB = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -990";
+		DZOMS_ServerWorld wa = MakeWorld("prox_order_a", 3, baseA);
+		DZOMS_ServerWorld wb = MakeWorld("prox_order_b", 3, baseB);
+		// one world for both players would need two maps; the order logic is the same on two proximity objects
+		DZOMS_Proximity pa = new DZOMS_Proximity();
+		pa.Init(wa);
+		DZOMS_Proximity pb = new DZOMS_Proximity();
+		pb.Init(wb);
+		DZOMS_PlayerState a = StateOf(11, baseA, 1, false, 0);
+		DZOMS_PlayerState b = StateOf(12, baseB, 1, false, 0);
+		// A is seen first; later the list is [B, A]: A's timer must not move to B
+		pa.Update(Players(a, null), 0);
+		pa.Update(Players(b, a), 2000);
+		pa.ProcessQueue(2000);
+		DZOMS_T.Check(wa.GetPromotedCount() > 0, "player order: A's zone opened after 2 s although the list order changed");
+		pb.Update(Players(b, a), 2000);
+		pb.ProcessQueue(2000);
+		DZOMS_T.EqInt(wb.GetPromotedCount(), 0, "player order: B is new, no zone yet");
+		pb.Update(Players(b, a), 4000);
+		pb.ProcessQueue(4000);
+		DZOMS_T.Check(wb.GetPromotedCount() > 0, "player order: B's zone opened after its own 2 s");
+		wa.Destroy();
+		wb.Destroy();
 	}
 
 	static void RunDisabled()
@@ -1025,6 +1054,7 @@ class DZOMS_Test_Proximity
 		RunModelEntries();
 		RunZoneRules();
 		RunProximityRules();
+		RunPlayerOrder();
 		RunDisabled();
 		RunPromotion();
 		RunProtocol();
