@@ -1063,6 +1063,15 @@ player by the BI id (`PlayerIdentity.GetId()`); an earlier version used the posi
 which moves when players join or leave. Every swap is announced to all clients; a client that never gets
 the networked copy (outside its network range) keeps its local copy and drops the swap after 10 s.
 
+### 13.10g Zombies in an area with always networked buildings (release candidate 3)
+
+Zombies only respect walls once the player has left an area and come back, also at buildings with doors
+(networked by rule, never touched by the swaps). The path graph for the map objects seems to be built
+lazily around players, so the single `ProcessMarkedObjectsForPathgraphUpdate()` after loading (server start,
+nobody around) does not cover them. Experiment `experimentalPathgraphArrival` (default off): when a zone
+opens, and after the player has moved 100 m, `UpdatePathgraphRegion` is called for a square of at most
+100 m half extent around the player; the status line counts these updates. Remove or keep by the result.
+
 ### 13.11 Where it lives
 
 | Where | Change |

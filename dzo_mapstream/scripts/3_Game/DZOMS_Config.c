@@ -45,6 +45,9 @@ class DZOMS_Config
 	// proximity networking (DESIGN 13): a networked copy of the map objects around a player who can use them
 	// (climbing, sounds); on unless disabled (objects then stay local and cannot be climbed)
 	bool disableProximity;
+	// experiment (zombies ignore walls near a player who just arrived, DESIGN 13.10g): update the path graph
+	// around a player when the zone opens and after the player has moved a good way
+	bool experimentalPathgraphArrival;
 	float networkRadius;	// player on foot, m
 	float vehicleRadius;	// slow vehicle, m
 	float maxFootSpeed;	// m/s; faster on foot: no networked objects

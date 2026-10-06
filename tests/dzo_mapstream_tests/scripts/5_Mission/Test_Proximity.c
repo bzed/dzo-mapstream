@@ -881,6 +881,32 @@ class DZOMS_Test_Proximity
 		wb.Destroy();
 	}
 
+	// experimentalPathgraphArrival: the path graph around a player is updated when the zone opens and
+	// again after the player has moved a good way
+	static void RunPathgraphArrival()
+	{
+		vector base = DZOMS_TestUtil.TEST_ORIGIN + "0 0 -1100";
+		DZOMS_ServerWorld w = MakeWorld("prox_arrival", 3, base);
+		DZOMS_Proximity prox = new DZOMS_Proximity();
+		prox.Init(w);
+		prox.m_ActivateDelayMs = 0;
+		prox.Update(Players(StateOf(1, base, 1, false, 0), null), 1000);
+		DZOMS_T.EqInt(prox.GetRegionUpdates(), 0, "arrival: off by default");
+		w.GetConfig().experimentalPathgraphArrival = true;
+		DZOMS_Proximity on = new DZOMS_Proximity();
+		on.Init(w);
+		on.m_ActivateDelayMs = 0;
+		on.Update(Players(StateOf(1, base, 1, false, 0), null), 1000);
+		DZOMS_T.EqInt(on.GetRegionUpdates(), 1, "arrival: updated when the zone opens");
+		on.Update(Players(StateOf(1, base + "20 0 0", 1, false, 0), null), 2000);
+		DZOMS_T.EqInt(on.GetRegionUpdates(), 1, "arrival: not again after 20 m");
+		on.Update(Players(StateOf(1, base + "150 0 0", 1, false, 0), null), 3000);
+		DZOMS_T.EqInt(on.GetRegionUpdates(), 2, "arrival: again after 150 m");
+		on.Update(Players(StateOf(1, base + "150 0 0", 8, false, 0), null), 4000);
+		DZOMS_T.EqInt(on.GetRegionUpdates(), 2, "arrival: a player without a zone causes no update");
+		w.Destroy();
+	}
+
 	static void RunDisabled()
 	{
 		DZOMS_ServerWorld w = MakeWorld("prox_off", 2, DZOMS_TestUtil.TEST_ORIGIN + "0 0 -120");
@@ -1055,6 +1081,7 @@ class DZOMS_Test_Proximity
 		RunZoneRules();
 		RunProximityRules();
 		RunPlayerOrder();
+		RunPathgraphArrival();
 		RunDisabled();
 		RunPromotion();
 		RunProtocol();
