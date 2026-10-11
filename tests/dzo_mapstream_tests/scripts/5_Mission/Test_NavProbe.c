@@ -298,6 +298,7 @@ class DZOMS_NavProbe: Managed
 	int m_Stage;
 
 	bool m_WaitForPlayer;
+	int m_WaitMs;
 	vector m_Center;
 	int m_PlayerSeenMs;
 
@@ -450,11 +451,24 @@ class DZOMS_NavProbe: Managed
 			if (m_PlayerSeenMs == 0)
 			{
 				m_PlayerSeenMs = now;
-				m_Center = OnGround(4410, 10210);
-				men.Get(0).SetPosition(m_Center);
-				DZOMS_Log.Info("navspawn: a player is here, moved to " + m_Center.ToString());
+				string mode = Variant();
+				m_WaitMs = 25000;
+				if (mode.Contains("wait60"))
+				{
+					m_WaitMs = 60000;
+				}
+				if (mode.Contains("natural"))
+				{
+					m_Center = men.Get(0).GetPosition();
+				}
+				else
+				{
+					m_Center = OnGround(4410, 10210);
+					men.Get(0).SetPosition(m_Center);
+				}
+				DZOMS_Log.Info("navspawn: a player is here (" + mode + "), centre " + m_Center.ToString() + ", waiting " + m_WaitMs.ToString() + " ms");
 			}
-			if (now - m_PlayerSeenMs < 25000)
+			if (now - m_PlayerSeenMs < m_WaitMs)
 			{
 				return;
 			}
