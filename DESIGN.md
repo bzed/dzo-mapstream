@@ -1077,6 +1077,17 @@ get no `ECE_UPDATEPATHGRAPH`, the path graph is not touched after loading) and `
 (promotion keeps the server's local copy, which holds the obstacle of the load-time path graph, so deleting
 the old object cannot remove it). Climbing with a kept local copy beside the networked one is to be checked.
 
+### 13.10h Probe with a real client (1.30, headless client at its natural spawn, 2026-10-11)
+
+`navclient` scenario: a real connected client, then 17 objects spawned in open ground, a zombie path test
+across each every 6 s. Result: **only networked objects ever block, and only after a delay**. Spawned 60 s
+after the player arrived, a networked `Land_Container_1Bo` (with `ECE_UPDATEPATHGRAPH`, or with a marked
+update) blocks the path 30 s later (not at 0 to 24 s). Spawned 25 s after arrival, nothing blocked within
+the 42 s observed. Local copies (same type, flag or mark, setpos+update) never block; the thin wall class
+object stayed open in every variant. Reading it: the navmesh regeneration job only runs for the area around
+a real player and takes tens of seconds; local objects are not regenerated at all. So right after a login
+the networked copies of a swap need a while before zombies respect them, and the local copies never count.
+
 ### 13.11 Where it lives
 
 | Where | Change |
