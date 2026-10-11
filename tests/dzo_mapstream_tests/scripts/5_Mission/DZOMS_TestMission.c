@@ -32,6 +32,41 @@ modded class MissionServer
 		{
 			DZOMS_TestSuites.RunAll();
 		}
+		if (scenario == "navprobe")
+		{
+			DZOMS_NavProbe.StartTimeline();
+			return;
+		}
+		if (scenario == "navboot")
+		{
+			DZOMS_NavProbe.StartBoot();
+			return;
+		}
+		if (scenario == "navclient")
+		{
+			DZOMS_NavProbe.StartClientSpawn();
+			return;
+		}
+		if (scenario == "navdoor")
+		{
+			DZOMS_NavProbe.StartDoor();
+			return;
+		}
+		if (scenario == "navspawn")
+		{
+			DZOMS_NavProbe.StartSpawn();
+			return;
+		}
+		if (scenario == "navcontrol")
+		{
+			DZOMS_NavProbe.StartControl();
+			return;
+		}
+		if (scenario == "navscan")
+		{
+			DZOMS_NavProbe.StartScan();
+			return;
+		}
 		DZOMS_T.Done();
 	}
 }

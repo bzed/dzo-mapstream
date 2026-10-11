@@ -99,6 +99,20 @@ scenario_prepare() {
 	mkdir -p "$SCEN_DIR"
 	echo "$1" >"$SCEN_DIR/scenario.txt"
 	case "$1" in
+	navprobe)
+		rm -rf "$CFG_DIR"
+		mkdir -p "$CFG_DIR/DZE"
+		case "${DZOMS_VARIANT:-none}" in
+		net*) echo '{ "networked": ["Land_Container_1Bo"], "disableProximity": true }' >"$CFG_DIR/config.json" ;;
+		*) echo '{ "networked": [], "disableProximity": true }' >"$CFG_DIR/config.json" ;;
+		esac
+		echo "${DZOMS_VARIANT:-none}" >"$SCEN_DIR/variant.txt"
+		;;
+	navscan|navcontrol|navspawn|navdoor|navclient)
+		rm -rf "$CFG_DIR"
+		mkdir -p "$CFG_DIR/DZE"
+		echo '{ "networked": [] }' >"$CFG_DIR/config.json"
+		;;
 	unit)
 		rm -rf "$CFG_DIR"
 		mkdir -p "$CFG_DIR/DZE"

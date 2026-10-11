@@ -3,6 +3,11 @@ class DZOMS_Test_Scenarios
 {
 	static void Prepare(string scenario)
 	{
+		if (scenario == "navprobe")
+		{
+			DZOMS_NavProbe.WriteWall();
+			return;
+		}
 		if (scenario != "fixtures")
 		{
 			return;
