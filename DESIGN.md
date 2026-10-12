@@ -1077,16 +1077,28 @@ get no `ECE_UPDATEPATHGRAPH`, the path graph is not touched after loading) and `
 (promotion keeps the server's local copy, which holds the obstacle of the load-time path graph, so deleting
 the old object cannot remove it). Climbing with a kept local copy beside the networked one is to be checked.
 
-### 13.10h Probe with a real client (1.30, headless client at its natural spawn, 2026-10-11)
+### 13.10h Probes with a real client (1.30, 2026-10-11 to 13): a start-up delay, nothing else
 
-`navclient` scenario: a real connected client, then 17 objects spawned in open ground, a zombie path test
-across each every 6 s. Result: **only networked objects ever block, and only after a delay**. Spawned 60 s
-after the player arrived, a networked `Land_Container_1Bo` (with `ECE_UPDATEPATHGRAPH`, or with a marked
-update) blocks the path 30 s later (not at 0 to 24 s). Spawned 25 s after arrival, nothing blocked within
-the 42 s observed. Local copies (same type, flag or mark, setpos+update) never block; the thin wall class
-object stayed open in every variant. Reading it: the navmesh regeneration job only runs for the area around
-a real player and takes tens of seconds; local objects are not regenerated at all. So right after a login
-the networked copies of a swap need a while before zombies respect them, and the local copies never count.
+Scenarios `navspawn`, `navclient`, `navswap` (headless client at its natural spawn, 17 objects in open
+ground, a path test across each every 6 s). An earlier version of this section said "local objects never
+block, networked ones block after a delay"; that was wrong, the runs were too short. What holds:
+
+- Every object the server creates at runtime, local or networked, with or without `ECE_UPDATEPATHGRAPH`,
+  marking, or the Editor's recipe, becomes a path obstacle **about 2 minutes after the server started**
+  (between 115 and 130 s on the test machine). It does not depend on a player: with the client joining at
+  170 s the obstacles were in at about 120 s.
+- Objects created after that point (200 s after the start) are obstacles within 6 s.
+- Deleting an object does not remove its obstacle (a local container deleted and not replaced still
+  blocked 144 s later). A swap (networked copy created, local copy deleted at once, after 20, 45 or 90 s,
+  or never, copy without the flag) leaves the place blocked at every time. So swaps open no window and
+  the 5 s `OLD_COPY_DELAY_MS` and `experimentalKeepLocalCopy` do not matter.
+- The Editor's exported `init.c` additionally calls `SetAffectPathgraph(true, false)` and
+  `UpdatePathgraphRegionByObject` 100 ms later per object; it changes nothing measurable (same delay).
+- The thin wall class object `StaticObj_Wall_IndCnch_10` blocks only in some variants (a thin obstacle).
+
+So zombies ignoring walls right after a login is, as far as the probes go, the first two minutes after a
+server start (a test cycle of restart and join immediately shows exactly that). Not yet checked: whether
+the delay grows with the number of map objects loaded at boot.
 
 ### 13.11 Where it lives
 

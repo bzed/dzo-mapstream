@@ -108,7 +108,7 @@ scenario_prepare() {
 		esac
 		echo "${DZOMS_VARIANT:-none}" >"$SCEN_DIR/variant.txt"
 		;;
-	navscan|navcontrol|navspawn|navdoor|navclient)
+	navscan|navcontrol|navspawn|navdoor|navclient|navswap)
 		rm -rf "$CFG_DIR"
 		mkdir -p "$CFG_DIR/DZE"
 		echo '{ "networked": [] }' >"$CFG_DIR/config.json"

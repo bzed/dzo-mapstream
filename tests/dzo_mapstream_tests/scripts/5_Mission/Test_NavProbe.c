@@ -332,6 +332,15 @@ class DZOMS_NavProbe: Managed
 		{
 			g_Game.GetWorld().MarkObjectForPathgraphUpdate(o);
 		}
+		if (o && (v & 16) != 0)
+		{
+			// the exported init.c of the DayZ Editor
+			o.SetAffectPathgraph(true, false);
+			if (o.CanAffectPathgraph())
+			{
+				g_Game.GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(g_Game.UpdatePathgraphRegionByObject, 100, false, o);
+			}
+		}
 		return o;
 	}
 
@@ -353,6 +362,10 @@ class DZOMS_NavProbe: Managed
 		if ((v & 8) != 0)
 		{
 			n = n + " mark";
+		}
+		if ((v & 16) != 0)
+		{
+			n = n + " editor-region";
 		}
 		return n;
 	}
@@ -476,7 +489,16 @@ class DZOMS_NavProbe: Managed
 		}
 		array<string> types = {"Land_Container_1Bo", "StaticObj_Wall_IndCnch_10"};
 		array<int> variants = {2, 8, 2 + 4, 4 + 8, 1 + 2, 1 + 8, 1 + 2 + 4, 1 + 4 + 8};
-		if (m_Stage == 0 && t >= 12000)
+		if (Variant().Contains("editor"))
+		{
+			variants = {4 + 16, 2 + 4 + 16, 1 + 4 + 16, 1 + 2 + 4 + 16, 16, 2 + 16, 4 + 8 + 16, 1 + 16};
+		}
+		int spawnAt = 12000;
+		if (Variant().Contains("late"))
+		{
+			spawnAt = 200000;
+		}
+		if (m_Stage == 0 && t >= spawnAt)
 		{
 			m_Stage = 1;
 			for (int i = 0; i < 8; i++)
@@ -573,10 +595,116 @@ class DZOMS_NavProbe: Managed
 			}
 			DZOMS_Log.Info("navspawn: " + made.ToString() + " test players created");
 		}
-		if (m_Stage >= 1 && now - m_SwapMs >= 45000)
+		int endMs = 45000;
+		if (Variant().Contains("xlong"))
+		{
+			endMs = 330000;
+		}
+		else if (Variant().Contains("long"))
+		{
+			endMs = 150000;
+		}
+		if (m_Stage >= 1 && now - m_SwapMs >= endMs)
 		{
 			g_Game.GetCallQueue(CALL_CATEGORY_SYSTEM).Remove(SpawnTick);
 			DZOMS_T.Done();
+		}
+	}
+
+	// ---- swap: a local object that is already an obstacle is replaced by a networked copy; for how long is the place open?
+	ref array<Object> m_SwapNew = new array<Object>();
+	ref array<int> m_SwapDelete = new array<int>();
+	int m_SwapAt;
+
+	static void StartSwap()
+	{
+		s_Run = new DZOMS_NavProbe();
+		s_Run.m_StartMs = g_Game.GetTime();
+		g_Game.GetCallQueue(CALL_CATEGORY_SYSTEM).CallLater(s_Run.SwapTick, 500, true);
+	}
+
+	void SwapTick()
+	{
+		int now = g_Game.GetTime();
+		int t = now - m_StartMs;
+		array<int> delays = {0, 20000, 45000, 90000, -1, 0, -1, 0};
+		if (m_Stage == 0 && t >= 12000)
+		{
+			m_Stage = 1;
+			for (int i = 0; i < 8; i++)
+			{
+				vector c = OnGround(4200 + 60 * i, 10000 + 60 * 3);
+				if (!OpenSite(c))
+				{
+					c = OnGround(4200 + 60 * i, 10000 + 60 * 5);
+				}
+				Object o = g_Game.CreateObjectEx("Land_Container_1Bo", c, ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD | ECE_NOPERSISTENCY_CHAR | ECE_LOCAL | ECE_UPDATEPATHGRAPH);
+				m_Objs.Insert(o);
+				m_From.Insert(c);
+				m_SwapNew.Insert(null);
+				m_SwapDelete.Insert(0);
+			}
+			g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
+			DZOMS_Log.Info("navswap: " + m_Objs.Count().ToString() + " local containers");
+		}
+		if (m_Stage == 1 && m_PlayerSeenMs == 0 && now - m_LastProbe >= 2000)
+		{
+			m_LastProbe = now;
+			if (Blocked(m_From.Get(0)).Contains("BLOCKED"))
+			{
+				m_PlayerSeenMs = now;
+				DZOMS_Log.Info("navswap: obstacles registered at t=" + (t / 1000).ToString());
+			}
+		}
+		if (m_Stage == 1 && m_PlayerSeenMs != 0 && now - m_PlayerSeenMs >= 15000)
+		{
+			m_Stage = 2;
+			m_SwapAt = now;
+			m_LastProbe = 0;
+			for (int k = 0; k < m_Objs.Count(); k++)
+			{
+				int fl = ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD | ECE_NOPERSISTENCY_CHAR;
+				if (k != 5)
+				{
+					fl = fl | ECE_UPDATEPATHGRAPH;
+				}
+				if (k == 7)
+				{
+					// control: only delete
+					m_SwapDelete.Set(k, 0);
+					continue;
+				}
+				Object nw = g_Game.CreateObjectEx("Land_Container_1Bo", m_From.Get(k), fl);
+				m_SwapNew.Set(k, nw);
+				m_SwapDelete.Set(k, delays.Get(k));
+			}
+			g_Game.GetWorld().ProcessMarkedObjectsForPathgraphUpdate();
+			DZOMS_Log.Info("navswap: networked copies created");
+		}
+		if (m_Stage == 2)
+		{
+			int rel = now - m_SwapAt;
+			for (int d = 0; d < m_Objs.Count(); d++)
+			{
+				if (m_Objs.Get(d) && m_SwapDelete.Get(d) >= 0 && rel >= m_SwapDelete.Get(d))
+				{
+					g_Game.ObjectDelete(m_Objs.Get(d));
+					m_Objs.Set(d, null);
+				}
+			}
+			if (now - m_LastProbe >= 6000)
+			{
+				m_LastProbe = now;
+				for (int q = 0; q < m_From.Count(); q++)
+				{
+					DZOMS_Log.Info("navswap t=" + (rel / 1000).ToString() + " site " + q.ToString() + " del=" + m_SwapDelete.Get(q).ToString() + " oldAlive=" + (m_Objs.Get(q) != null).ToString() + " : " + Blocked(m_From.Get(q)));
+				}
+			}
+			if (rel >= 150000)
+			{
+				g_Game.GetCallQueue(CALL_CATEGORY_SYSTEM).Remove(SwapTick);
+				DZOMS_T.Done();
+			}
 		}
 	}
 

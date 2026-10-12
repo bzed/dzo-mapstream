@@ -47,6 +47,11 @@ modded class MissionServer
 			DZOMS_NavProbe.StartClientSpawn();
 			return;
 		}
+		if (scenario == "navswap")
+		{
+			DZOMS_NavProbe.StartSwap();
+			return;
+		}
 		if (scenario == "navdoor")
 		{
 			DZOMS_NavProbe.StartDoor();
