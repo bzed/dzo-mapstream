@@ -45,12 +45,6 @@ class DZOMS_Config
 	// proximity networking (DESIGN 13): a networked copy of the map objects around a player who can use them
 	// (climbing, sounds); on unless disabled (objects then stay local and cannot be climbed)
 	bool disableProximity;
-	// experiments for zombies that ignore walls after swaps (DESIGN 13.10g), removed once the cause is known.
-	// no pathgraph: swapped copies get no ECE_UPDATEPATHGRAPH and the path graph is not updated after a swap.
-	// keep local: promotion keeps the server's local copy (it holds the obstacle of the load-time path graph)
-	// and demotion reuses it.
-	bool experimentalNoPathgraph;
-	bool experimentalKeepLocalCopy;
 	float networkRadius;	// player on foot, m
 	float vehicleRadius;	// slow vehicle, m
 	float maxFootSpeed;	// m/s; faster on foot: no networked objects

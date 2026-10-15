@@ -184,14 +184,6 @@ class DZOMS_Test_Config
 		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "old file: not rewritten");
 		DZOMS_T.Check(!FileExist(dir + "/config.json.v1.bak"), "old file: no backup");
 
-		// experiments for the zombie problem: off by default
-		dir = CaseDir("experiments");
-		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(!c.experimentalNoPathgraph && !c.experimentalKeepLocalCopy, "experiments are off by default");
-		WriteText(dir + "/config.json", "{ \"experimentalNoPathgraph\": true, \"experimentalKeepLocalCopy\": true }");
-		c = DZOMS_Config.Load(dir);
-		DZOMS_T.Check(c.experimentalNoPathgraph && c.experimentalKeepLocalCopy, "experiments can be switched on");
-
 		// proximity networking switch
 		dir = CaseDir("proximity_off");
 		c = DZOMS_Config.Load(dir);

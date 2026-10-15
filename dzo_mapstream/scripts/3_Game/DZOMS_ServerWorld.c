@@ -110,7 +110,6 @@ class DZOMS_ServerWorld
 	protected ref array<ref DZOMS_Batch> m_Batches = new array<ref DZOMS_Batch>();
 	protected ref array<bool> m_Promoted = new array<bool>();	// per object: a networked copy exists (DESIGN 13.4)
 	protected int m_PromotedCount;
-	protected ref array<Object> m_KeptLocal = new array<Object>();	// experiment: the local copy of a promoted object
 	protected ref array<int> m_ObjectBatch = new array<int>();	// per object: its batch
 	protected ref array<int> m_ObjectIndex = new array<int>();	// per object: its position inside that batch
 	protected ref DZOMS_Manifest m_Manifest = new DZOMS_Manifest();
@@ -280,8 +279,7 @@ class DZOMS_ServerWorld
 		return true;
 	}
 
-	// as Promote, but the caller deletes the old local copy later: the path graph needs time to take the new
-	// object in, and zombies walk through the gap when the old obstacle is gone before that
+	// as Promote, but the caller deletes the old local copy later (clients swap their copy first)
 	bool PromoteKeepOld(int i, out Object oldLocal)
 	{
 		oldLocal = null;
@@ -294,7 +292,7 @@ class DZOMS_ServerWorld
 		{
 			return false;
 		}
-		Object fresh = SpawnOnServerEx(m_Objects.Get(i), true, !m_Config.experimentalNoPathgraph);
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), true, true);
 		if (!fresh)
 		{
 			return false;
@@ -306,14 +304,7 @@ class DZOMS_ServerWorld
 		{
 			promoted.DisableSimulation(true);
 		}
-		if (m_Config.experimentalKeepLocalCopy)
-		{
-			m_KeptLocal.Set(i, old);
-		}
-		else
-		{
-			oldLocal = old;
-		}
+		oldLocal = old;
 		m_Spawned.Set(i, fresh);
 		MarkPromoted(i, true);
 		return true;
@@ -330,16 +321,11 @@ class DZOMS_ServerWorld
 			return false;
 		}
 		Object old = m_Spawned.Get(i);
-		Object fresh = m_KeptLocal.Get(i);
-		if (!fresh)
-		{
-			fresh = SpawnOnServerEx(m_Objects.Get(i), false, !m_Config.experimentalNoPathgraph);
-		}
+		Object fresh = SpawnOnServerEx(m_Objects.Get(i), false, true);
 		if (!fresh)
 		{
 			return false;
 		}
-		m_KeptLocal.Set(i, null);
 		m_Spawned.Set(i, fresh);
 		MarkPromoted(i, false);
 		oldNetworked = old;
@@ -518,12 +504,10 @@ class DZOMS_ServerWorld
 
 		DZOMS_BatchBuilder.Build(m_Objects, m_Config.batchSize, m_Batches, m_Manifest.bounds, m_ObjectBatch, m_ObjectIndex);
 		m_Promoted.Clear();
-		m_KeptLocal.Clear();
 		m_PromotedCount = 0;
 		for (int pi = 0; pi < m_Objects.Count(); pi++)
 		{
 			m_Promoted.Insert(false);
-			m_KeptLocal.Insert(null);
 		}
 		m_Manifest.viewDistance = m_Config.viewDistance;
 		m_Manifest.proxyDistance = m_Config.proxyDistance;
@@ -853,14 +837,6 @@ class DZOMS_ServerWorld
 				g_Game.ObjectDelete(m_Spawned.Get(i));
 			}
 		}
-		for (int k = 0; k < m_KeptLocal.Count(); k++)
-		{
-			if (m_KeptLocal.Get(k))
-			{
-				g_Game.ObjectDelete(m_KeptLocal.Get(k));
-			}
-		}
-		m_KeptLocal.Clear();
 		m_Spawned.Clear();
 		m_Objects.Clear();
 

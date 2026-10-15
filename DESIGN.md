@@ -989,10 +989,8 @@ Build `da91b22`: every living player on foot, radius 40 m, no config.
 ### 13.10b Second and third prototype checks, 2026-10-04
 
 - **Swaps work:** 373 swaps, none timed out, no displaced twin in a dense area (client counters).
-- **Zombies still walk through walls** with `experimentalNoPathgraph` (no path graph update after
-  a swap) and with `experimentalKeepLocalCopy` (no object deleted). So neither the update nor the
-  deletion is the cause. A control run with `disableProximity` decides whether the swapping
-  matters at all. Open.
+- **Zombies still walked through walls** in these runs, with the path graph updates switched off and with
+  no object deleted (experiments since removed). The cause turned out to be a start-up delay (13.10h).
 - **Model objects (`.p3d` entries) and items sit where the entry does not say.** The client logged
   231 displaced twins, almost all models (plants, rocks, crates, tire piles) and two items
   (`WaterBottle`, `FireExtinguisher`), 0.4 to 2 m off and rotated. Causes:
@@ -1072,10 +1070,9 @@ objects the mod spawned, unless they are marked again. Reading it back: the expe
 before the one update after loading existed, so they proved nothing; with that update in place (builds 5 to
 9) zombies were fine, and the problems start with the runtime updates after swaps (the objects swapped
 get marked and processed; the region is rebuilt around them).
-Experiments (config, default off, removed once the cause is known): `experimentalNoPathgraph` (swapped copies
-get no `ECE_UPDATEPATHGRAPH`, the path graph is not touched after loading) and `experimentalKeepLocalCopy`
-(promotion keeps the server's local copy, which holds the obstacle of the load-time path graph, so deleting
-the old object cannot remove it). Climbing with a kept local copy beside the networked one is to be checked.
+The two experiments of this round (`experimentalNoPathgraph`, `experimentalKeepLocalCopy`) changed nothing and
+are removed; the probes of 13.10h explain the symptom. The probe scenarios are removed from the tests as well
+(they are in the git history, commits c974b3a to 58285ed).
 
 ### 13.10h Probes with a real client (1.30, 2026-10-11 to 13): a start-up delay, nothing else
 
@@ -1091,7 +1088,7 @@ block, networked ones block after a delay"; that was wrong, the runs were too sh
 - Deleting an object does not remove its obstacle (a local container deleted and not replaced still
   blocked 144 s later). A swap (networked copy created, local copy deleted at once, after 20, 45 or 90 s,
   or never, copy without the flag) leaves the place blocked at every time. So swaps open no window and
-  the 5 s `OLD_COPY_DELAY_MS` and `experimentalKeepLocalCopy` do not matter.
+  the 5 s `OLD_COPY_DELAY_MS` is not needed for the path graph (it stays as a harmless delay).
 - The Editor's exported `init.c` additionally calls `SetAffectPathgraph(true, false)` and
   `UpdatePathgraphRegionByObject` 100 ms later per object; it changes nothing measurable (same delay).
 - The thin wall class object `StaticObj_Wall_IndCnch_10` blocks only in some variants (a thin obstacle).
