@@ -5,7 +5,7 @@ as plain data instead of thousands of networked objects. The server and every
 client spawn the objects locally. Objects that only work when networked (doors,
 ladders, levers, ...) are spawned as networked objects by the server.
 
-Target: DayZ 1.29 and 1.30. Status: implemented; section 13 (proximity networking) was added after the first
+Target: DayZ 1.30 (1.29 was dropped for the proximity work; the mod has no 1.29 specific code left, but it is not tested there). Status: implemented; section 13 (proximity networking) was added after the first
 in-game tests and is described there, with the findings it rests on.
 
 ## 1. Goals

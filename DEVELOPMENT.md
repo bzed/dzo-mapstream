@@ -57,13 +57,14 @@ links to the addon folder; `pack/secrets/` holds the private key and is git-igno
 ```sh
 P=~/.claude/skills/dayz-dev/scripts/dayz-mod-pack.sh
 $P -C pack build && $P -C pack check     # pack/build/@dzo_mapstream, the folder to upload
-DZOMS_PACKAGE=1 tools/run-server-tests.sh && DZOMS_PACKAGE=1 DZOMS_SERVER=exp tools/run-server-tests.sh
+DZOMS_PACKAGE=1 tools/run-server-tests.sh
 $P -C pack publish-hint                  # prints the `workshop create/update` commands
 ```
 
 Server owners copy `pack/keys/dzo_mapstream.bikey` into their `keys/` folder.
-`DZOMS_SERVER=exp` runs the tests on the 1.30 experimental server; the Dabs Framework build from the
-workshop does not compile on 1.30 (a missing `;` in `Types.c`), so the runner patches a private copy.
+The tests run on the 1.30 stable server by default; `DZOMS_SERVER=exp` runs them on the experimental server. For
+the experimental server the runner patches a private copy of the Dabs Framework (a missing `;` in `Types.c`, the
+stable server accepted the workshop build as is).
 
 Signing note: DayZ's own `DSSignFile` includes `.c` script files in the third signature hash. The
 armake2 used for `pack/` must do the same (the bzed fork with the `.c` fix in `src/sign.rs`), otherwise

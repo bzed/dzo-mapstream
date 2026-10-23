@@ -4,7 +4,7 @@ Put big maps made with the DayZ Editor (bases, events, bunkers, shooting ranges,
 
 You build the map with the DayZ Editor, save it as a [b].dze[/b] file and drop the file into a folder on your server. The mod does the rest.
 
-[b]Supported DayZ versions:[/b] 1.29 and 1.30
+[b]Supported DayZ versions:[/b] 1.30
 
 [h2]How it works[/h2]
 

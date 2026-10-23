@@ -1,10 +1,10 @@
-// FindFile path helper for DayZ 1.29 and 1.30 (copy of the dayz-dev skill fallback, no CF dependency).
+// FindFile path helper for DayZ 1.30 (copy of the dayz-dev skill fallback, no CF dependency).
 // 1.30 ignores $profile:/$mission:/$storage: in FindFile (DZEXP-134) and silently lists the server root,
 // so every FindFile pattern goes through DZOMS_FindFilePath. All other file functions accept the placeholders.
 // Needs -profiles=<dir> on 1.30.
 
 //! "mpmissions/dayzOffline.chernarusplus/mission.c" -> "mpmissions/dayzOffline.chernarusplus".
-//! Not g_Game.GetMissionFolderPath(): it only splits on '\' and returns "" on both 1.29 and 1.30 servers.
+//! Not g_Game.GetMissionFolderPath(): it only splits on '\' and returns "" on 1.30 servers.
 static string DZOMS_MissionFolder()
 {
 	string path = g_Game.GetMissionPath();
@@ -33,7 +33,6 @@ static string DZOMS_FindFilePath(string pattern)
 		if (root != "")
 			root = string.Format("%1/storage_%2", root, g_Game.ServerConfigGetInt("instanceId"));
 	}
-#ifndef DAYZ_1_29
 	else if (lower.IndexOf("$profile:") == 0)
 	{
 		cut = 9;
@@ -48,7 +47,6 @@ static string DZOMS_FindFilePath(string pattern)
 	{
 		return pattern.Substring(12, pattern.Length() - 12);
 	}
-#endif
 
 	if (cut < 0)
 		return pattern;

@@ -8,7 +8,7 @@ Workshop page: https://steamcommunity.com/sharedfiles/filedetails/?id=3812840035
 You build a map with the DayZ Editor, save it as a `.dze` file and drop the file into a folder on
 your server. The mod does the rest.
 
-Supported DayZ versions: 1.29 and 1.30.
+Supported DayZ version: 1.30 (tested on the 1.30 stable server, build 25963285).
 
 ## What it does (and what "networked" means)
 

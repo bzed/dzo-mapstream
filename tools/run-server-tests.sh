@@ -1,6 +1,6 @@
 #!/bin/bash
 # Headless server tests. Usage: tools/run-server-tests.sh [scenario...]   (default: all scenarios)
-# Env: DZOMS_SERVER (stable|exp, default stable: 1.29 stable or 1.30 experimental server),
+# Env: DZOMS_SERVER (stable|exp, default stable: the 1.30 stable server, exp = the experimental server),
 #      DZOMS_PACKAGE=1 (test pack/build/@dzo_mapstream, the signed armake2 build),
 #      DZOMS_TREE (server tree, default ~/dayz-testserver-dzoms[-exp]), DZOMS_RUNTIME (seconds, default 120)
 SKILL=/home/bzed/.claude/skills/dayz-dev/scripts
@@ -147,8 +147,7 @@ scenario_boot() {
 	local base mod
 	run_server boot-vanilla "@DabsFramework" "" || { echo "boot-vanilla: server did not run"; return 1; }
 	run_server boot-mod "@DabsFramework;@dzo-mapstream" '\[dzo-mapstream\] ready' || { echo "boot: no ready line"; return 1; }
-	local want=DAYZ_1_29
-	[ "${DZOMS_SERVER:-stable}" = exp ] && want=DAYZ_1_30
+	local want=DAYZ_1_30
 	grep -q "$want" "$BUILD/last-boot-mod.log" || { echo "engine define $want missing: wrong server?"; return 1; }
 	echo "engine: $want"
 	base=$(module_count "$BUILD/last-boot-vanilla.log" Game)
