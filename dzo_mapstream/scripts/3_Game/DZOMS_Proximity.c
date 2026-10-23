@@ -467,8 +467,11 @@ class DZOMS_Proximity
 			Object oldLocal;
 			if (m_World.PromoteKeepOld(pi, oldLocal))
 			{
-				m_DeleteObjects.Insert(oldLocal);
-				m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
+				if (oldLocal)
+				{
+					m_DeleteObjects.Insert(oldLocal);
+					m_DeleteDue.Insert(nowMs + OLD_COPY_DELAY_MS);
+				}
 				m_Networked.Insert(pi);
 				m_NeededAt.Set(pi, nowMs);
 				m_AnnounceIdx.Insert(pi);

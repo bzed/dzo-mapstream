@@ -279,8 +279,7 @@ class DZOMS_ServerWorld
 		return true;
 	}
 
-	// as Promote, but the caller deletes the old local copy later: the path graph needs time to take the new
-	// object in, and zombies walk through the gap when the old obstacle is gone before that
+	// as Promote, but the caller deletes the old local copy later (clients swap their copy first)
 	bool PromoteKeepOld(int i, out Object oldLocal)
 	{
 		oldLocal = null;

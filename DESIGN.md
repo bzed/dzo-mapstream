@@ -989,10 +989,8 @@ Build `da91b22`: every living player on foot, radius 40 m, no config.
 ### 13.10b Second and third prototype checks, 2026-10-04
 
 - **Swaps work:** 373 swaps, none timed out, no displaced twin in a dense area (client counters).
-- **Zombies still walk through walls** with `experimentalNoPathgraph` (no path graph update after
-  a swap) and with `experimentalKeepLocalCopy` (no object deleted). So neither the update nor the
-  deletion is the cause. A control run with `disableProximity` decides whether the swapping
-  matters at all. Open.
+- **Zombies still walked through walls** in these runs, with the path graph updates switched off and with
+  no object deleted (experiments since removed). The cause turned out to be a start-up delay (13.10h).
 - **Model objects (`.p3d` entries) and items sit where the entry does not say.** The client logged
   231 displaced twins, almost all models (plants, rocks, crates, tire piles) and two items
   (`WaterBottle`, `FireExtinguisher`), 0.4 to 2 m off and rotated. Causes:
@@ -1062,6 +1060,42 @@ when it has been outside every zone for `RELEASE_DELAY_MS` and farther than 1.5 
 player by the BI id (`PlayerIdentity.GetId()`); an earlier version used the position in the player list,
 which moves when players join or leave. Every swap is announced to all clients; a client that never gets
 the networked copy (outside its network range) keeps its local copy and drops the swap after 10 s.
+
+### 13.10g Zombies in an area with always networked buildings (release candidates 3 and 4)
+
+Zombies only respect walls once the player has left an area and come back, also at buildings with doors
+(networked by rule, never touched by the swaps). Candidate 4 updated the path graph by region around an
+arriving player: **zombies then ignored all buildings**. So an update of a region rebuilds it without the
+objects the mod spawned, unless they are marked again. Reading it back: the experiments of 13.10b ran
+before the one update after loading existed, so they proved nothing; with that update in place (builds 5 to
+9) zombies were fine, and the problems start with the runtime updates after swaps (the objects swapped
+get marked and processed; the region is rebuilt around them).
+The two experiments of this round (`experimentalNoPathgraph`, `experimentalKeepLocalCopy`) changed nothing and
+are removed; the probes of 13.10h explain the symptom. The probe scenarios are removed from the tests as well
+(they are in the git history, commits c974b3a to 58285ed).
+
+### 13.10h Probes with a real client (1.30, 2026-10-11 to 13): a start-up delay, nothing else
+
+Scenarios `navspawn`, `navclient`, `navswap` (headless client at its natural spawn, 17 objects in open
+ground, a path test across each every 6 s). An earlier version of this section said "local objects never
+block, networked ones block after a delay"; that was wrong, the runs were too short. What holds:
+
+- Every object the server creates at runtime, local or networked, with or without `ECE_UPDATEPATHGRAPH`,
+  marking, or the Editor's recipe, becomes a path obstacle **about 2 minutes after the server started**
+  (between 115 and 130 s on the test machine). It does not depend on a player: with the client joining at
+  170 s the obstacles were in at about 120 s.
+- Objects created after that point (200 s after the start) are obstacles within 6 s.
+- Deleting an object does not remove its obstacle (a local container deleted and not replaced still
+  blocked 144 s later). A swap (networked copy created, local copy deleted at once, after 20, 45 or 90 s,
+  or never, copy without the flag) leaves the place blocked at every time. So swaps open no window and
+  the 5 s `OLD_COPY_DELAY_MS` is not needed for the path graph (it stays as a harmless delay).
+- The Editor's exported `init.c` additionally calls `SetAffectPathgraph(true, false)` and
+  `UpdatePathgraphRegionByObject` 100 ms later per object; it changes nothing measurable (same delay).
+- The thin wall class object `StaticObj_Wall_IndCnch_10` blocks only in some variants (a thin obstacle).
+
+So zombies ignoring walls right after a login is, as far as the probes go, the first two minutes after a
+server start (a test cycle of restart and join immediately shows exactly that). Not yet checked: whether
+the delay grows with the number of map objects loaded at boot.
 
 ### 13.11 Where it lives
 
