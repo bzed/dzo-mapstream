@@ -282,10 +282,9 @@ All server work happens in `MissionServer.OnInit()`, after `super.OnInit()`.
 1. Load and normalize the config (5.6).
 2. List `DZE/` with `FindFile` (pattern `*`, directories skipped, extension `.dze` in any
    case). The file system order is not defined, so the names are sorted case-insensitively;
-   that order is the load order and therefore part of the batch hashes. `FindFile` ignores
-   `$profile:` on 1.30 (DZEXP-134): the pattern goes through `DZOMS_FindFilePath` (copy of the
-   dayz-dev skill's helper), which needs `-profiles=` on 1.30. Open files with the `$profile:`
-   path, never with the resolved one.
+   that order is the load order and therefore part of the batch hashes. `FindFile` ignored
+   `$profile:` on 1.30 before 1.30.164200 (DZEXP-134, fixed in build 25963285); the mod used a path helper
+   for that and calls plain `FindFile` now, so it needs 1.30.164200 or newer.
    `maps[]` entries are per-file overrides: reject `file` values containing `..`, `/`, `\` or `:`,
    skip duplicates (case-insensitive) with a warning. A listed file that is `disabled` is
    skipped; an entry without a file in `DZE/` is an error. Per found file: `FileExist`, then

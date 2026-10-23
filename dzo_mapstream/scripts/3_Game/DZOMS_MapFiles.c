@@ -11,7 +11,7 @@ class DZOMS_MapFiles
 		string fileName;
 		FileAttr attr;
 		// pattern "*" and a manual extension check: the pattern match is case sensitive on Linux
-		FindFileHandle h = FindFile(DZOMS_FindFilePath(dir + "/*"), fileName, attr, FindFileFlags.ALL);
+		FindFileHandle h = FindFile(dir + "/*", fileName, attr, FindFileFlags.ALL);
 		bool found = fileName != "";
 		while (found)
 		{

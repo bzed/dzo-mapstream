@@ -50,7 +50,7 @@ This mod does it differently for most objects:
    Use the names of the mod folders you have, and keep Dabs Framework first. Use `-mod=`, not
    `-servermod=`: players need the mod too, and the launcher then downloads it for them
    automatically. They do not have to do anything.
-3. `-profiles=<folder>` is required (on DayZ 1.30 the mod needs it to find its folder). Everything
+3. `-profiles=<folder>` is required. Everything
    the mod stores on the server lives in that folder.
 4. If your server checks signatures (`verifySignatures`), copy the `.bikey` files from the `keys`
    folders of both mods into the `keys` folder of your server.

@@ -27,7 +27,7 @@ class DZOMS_Test_MapFiles
 		DZOMS_MapFiles.List(DZOMS_T.DIR + "/DZE_does_not_exist", none);
 		DZOMS_T.EqInt(none.Count(), 0, "missing folder lists nothing");
 
-		// the 1.30 bug (DZEXP-134) returns the server root's files for $profile: patterns
+		// regression of the 1.30 bug (DZEXP-134, fixed in 1.30.164200): FindFile returned the server root's files for $profile: patterns
 		bool rootLeak = false;
 		for (int j = 0; j < found.Count(); j++)
 		{
