@@ -32,6 +32,11 @@ modded class MissionServer
 		{
 			DZOMS_TestSuites.RunAll();
 		}
+		if (scenario == "clientview")
+		{
+			DZOMS_ClientView.Start();
+			return;
+		}
 		DZOMS_T.Done();
 	}
 }

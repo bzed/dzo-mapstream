@@ -23,6 +23,13 @@ tools/run-server-tests.sh            # boot unit noconfig broken fixtures determ
 tools/run-server-tests.sh unit       # one scenario
 ```
 
+### Real client check (headless)
+
+`tools/run-client-view.sh <out-dir>` starts a server with `tests/dze`, joins a headless 1.30 client (needs Steam, sway,
+grim; one game at a time), walks the player to 35 m in front of each object and saves a screenshot per stop
+(`stopN.png`). The client log in the Proton prefix (`.../AppData/Local/DayZ/script_*.log`) has the `[dzo-mapstream]`
+status and swap counters.
+
 ### In-game test list (manual)
 
 The client side cannot be tested headless. Confirmed in a real game (1.29 client, signed Workshop

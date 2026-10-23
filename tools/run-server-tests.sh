@@ -119,6 +119,12 @@ scenario_prepare() {
 		cp "$ROOT/tests/dze/"*.dze "$CFG_DIR/DZE/"
 		echo '{ "networked": ["@doors", "@ladders", "@actions", "@fixedItems"], "debugLog": true }' >"$CFG_DIR/config.json"
 		;;
+	clientview)
+		rm -rf "$CFG_DIR"
+		mkdir -p "$CFG_DIR/DZE"
+		cp "$ROOT/tests/dze/"*.dze "$CFG_DIR/DZE/"
+		echo '{ "networked": ["@doors", "@ladders", "@actions", "@fixedItems"], "debugLog": true }' >"$CFG_DIR/config.json"
+		;;
 	fixtures)
 		rm -rf "$CFG_DIR"
 		mkdir -p "$CFG_DIR/DZE"
