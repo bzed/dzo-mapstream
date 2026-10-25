@@ -32,4 +32,19 @@ modded class BuildingBase
 		}
 		super.RemoveAction(actionName);
 	}
+
+	// a networked twin of a map object streams in with a default yaw and scale 1: the client world puts it at its entry
+	override void EEInit()
+	{
+		super.EEInit();
+		if (g_Game.IsDedicatedServer())
+		{
+			return;
+		}
+		DZOMS_ClientWorld world = GetDayZGame().DZOMS_GetClientWorld();
+		if (world)
+		{
+			world.OnObjectInit(this);
+		}
+	}
 }

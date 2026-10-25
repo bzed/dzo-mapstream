@@ -37,6 +37,11 @@ modded class MissionServer
 			DZOMS_ClientView.Start();
 			return;
 		}
+		if (scenario == "rockview")
+		{
+			DZOMS_RockView.Start();
+			return;
+		}
 		DZOMS_T.Done();
 	}
 }

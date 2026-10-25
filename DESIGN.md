@@ -1110,6 +1110,27 @@ the delay grows with the number of map objects loaded at boot.
 | spawning of model objects | engine placement, entries rewritten to the origin with `FLAG_ORIGIN` (13.10d) |
 | docs | README (what "networked" means now, the new fields, why climbing needs it); `workshop.txt` |
 
+### 13.10i Rocks that turn and slide when they become networked (1.30, 2026-10-25)
+
+Seen on a server with a large rock field (Revan bunker `.dze`, about 780 `bldr_rock_*` objects, `bldr_*` classes
+from the BuilderItems mod): the rocks "slid in and out of place for a second" when a player came near. Found with
+`tools/run-rock-view.sh` (real client, Livonia, one `.dze`; the client probe in `Test_RockView.c` logs every change
+around six rocks):
+
+- A promoted class object reaches the client with **yaw -0.2238 and scale 1**, whatever its entry says; the server's
+  `SetOrientation` arrives about 200 ms later through the normal transform update. Position is right from the start.
+  The local copy stands next to the twin until the swap, so for 0.2 s each rock showed twice, once turned wrongly.
+- The announcement (`OBJECTS_NETWORKED`) follows the first twins by up to 1.5 s when a few hundred are promoted at
+  once, so the swap code (`SwapStep`, 20 per frame) and the watch (round robin) came too late.
+- Fix (client only): `BuildingBase.EEInit` calls `DZOMS_ClientWorld.OnObjectInit`. A twin whose id is announced is put
+  at its entry at once; an unannounced one of a loaded class type takes yaw and scale of the local copy at the same
+  place (`GetObjectsAtPosition3D`, 0.3 m; our own spawns are skipped with `s_InSpawn`). `HandleNetworked` fixes twins
+  that are already there, and the watch now covers every announced twin, not only scaled ones (60 per frame).
+  Re-run: 0 wrong yaw lines in the probe (before: 9 to 18 per run), counted as "twins turned" in the status line.
+- Not fixed: the server still spends about 1.2 to 1.9 s per cycle promoting 780 rocks, and a flight back and forth
+  repeats it. Rocks and terrain patches nobody climbs belong into `proximityExclude`
+  (`["bldr_rock_*", "staticobj_terrain_*"]`); with that the user saw no problem.
+
 ## 14. Enforce Script pitfalls (verified on 1.29)
 
 - `JsonFileLoader<T>.LoadFile()` zero-initializes missing fields (section 5.2).

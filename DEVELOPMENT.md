@@ -30,6 +30,11 @@ grim; one game at a time), walks the player to 35 m in front of each object and 
 (`stopN.png`). The client log in the Proton prefix (`.../AppData/Local/DayZ/script_*.log`) has the `[dzo-mapstream]`
 status and swap counters.
 
+`tools/run-rock-view.sh <file.dze> <out-dir>` does the same on Livonia with one real `.dze` (the BuilderItems mod,
+Workshop 1565871491, supplies the `bldr_*` classes): the player stands at the densest rock cluster, 600 m away, and back,
+screenshots every 3 s in the first 24 s of each stay, and the client probe (`Test_RockView.c`) logs every change of
+what stands around six rocks (`rockprobe` lines in the client log: local or networked, offset, scale, yaw).
+
 ### In-game test list (manual)
 
 The client side cannot be tested headless. Confirmed in a real game (1.29 client, signed Workshop

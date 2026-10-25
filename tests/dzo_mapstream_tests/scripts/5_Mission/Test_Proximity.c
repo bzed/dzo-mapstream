@@ -295,6 +295,59 @@ class DZOMS_Test_Proximity
 		g_Game.ObjectDelete(scaledTwin);
 		sw.Destroy();
 
+		// a twin streams in with another yaw than its entry (the server's orientation arrives a few frames
+		// later): the client turns it right away, the local copy goes only then
+		array<ref DZOMS_ObjectEntry> yl = new array<ref DZOMS_ObjectEntry>();
+		vector ybase = base + "300 0 0";
+		yl.Insert(new DZOMS_ObjectEntry("Apple", ybase, "40 0 0", 1, 0));
+		array<ref DZOMS_Batch> ysb = new array<ref DZOMS_Batch>();
+		array<float> ybo = new array<float>();
+		DZOMS_BatchBuilder.Build(yl, 400, ysb, ybo);
+		DZOMS_ClientWorld yw = new DZOMS_ClientWorld("");
+		yw.m_Offline = true;
+		yw.Update(ybase, DZOMS_Test_ClientSpawn.s_Time, true);
+		yw.HandleManifest(DZOMS_Test_ClientDownload.MakeManifest(ysb, ybo, true), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Batch yc = DZOMS_Test_ClientDownload.Clone(ysb.Get(0));
+		yc.index = 0;
+		yw.HandleBatch(yc, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(yw, ybase, 16);
+		DZOMS_Test_ClientSpawn.Frame(yw, ybase, 16);
+		Object yawTwin = g_Game.CreateObjectEx("Apple", ybase, ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		yawTwin.SetOrientation("-0.2238 0 0");
+		int ywLow, ywHigh;
+		yawTwin.GetNetworkID(ywLow, ywHigh);
+		yw.HandleNetworked(OneNet(0, 0, ywLow, ywHigh), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(yw, ybase, 16);
+		DZOMS_T.Check(yw.GetClientBatch(0).objects.Get(0) == null, "the turned twin took over");
+		DZOMS_T.EqFloat(yawTwin.GetOrientation()[0], 40, "the twin has the entry's yaw now");
+		DZOMS_T.EqInt(yw.GetTurnFixedCount(), 1, "the turned twin is counted");
+		g_Game.ObjectDelete(yawTwin);
+		yw.Destroy();
+
+		// a twin created before its announcement takes the yaw of the local copy at the same place
+		array<ref DZOMS_ObjectEntry> el = new array<ref DZOMS_ObjectEntry>();
+		vector ebase = base + "400 0 0";
+		el.Insert(new DZOMS_ObjectEntry("Apple", ebase, "70 0 0", 1, 0));
+		array<ref DZOMS_Batch> esb = new array<ref DZOMS_Batch>();
+		array<float> ebo = new array<float>();
+		DZOMS_BatchBuilder.Build(el, 400, esb, ebo);
+		DZOMS_ClientWorld ew = new DZOMS_ClientWorld("");
+		ew.m_Offline = true;
+		ew.Update(ebase, DZOMS_Test_ClientSpawn.s_Time, true);
+		ew.HandleManifest(DZOMS_Test_ClientDownload.MakeManifest(esb, ebo, true), DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Batch ec = DZOMS_Test_ClientDownload.Clone(esb.Get(0));
+		ec.index = 0;
+		ew.HandleBatch(ec, DZOMS_Test_ClientSpawn.s_Time);
+		DZOMS_Test_ClientSpawn.Frame(ew, ebase, 16);
+		DZOMS_Test_ClientSpawn.Frame(ew, ebase, 16);
+		Object early = g_Game.CreateObjectEx("Apple", ebase, ECE_SETUP | ECE_CREATEPHYSICS | ECE_NOLIFETIME | ECE_NOPERSISTENCY_WORLD);
+		early.SetOrientation("0 0 0");
+		ew.OnObjectInit(early);
+		DZOMS_T.EqFloat(early.GetOrientation()[0], 70, "the unannounced twin took the yaw of the local copy");
+		DZOMS_T.EqInt(ew.GetTurnFixedCount(), 1, "the early twin is counted");
+		g_Game.ObjectDelete(early);
+		ew.Destroy();
+
 		// login in an area whose objects are networked already: announced before the batch spawns, no
 		// local copy exists, and the twin that streams in still gets its scale (and keeps it)
 		array<ref DZOMS_ObjectEntry> ll = new array<ref DZOMS_ObjectEntry>();
