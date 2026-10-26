@@ -20,10 +20,16 @@ class DZOMS_Sha256
 
 	static string HashWords(array<int> words)
 	{
-		int n = words.Count();
+		return HashWords(words, 0, words.Count());
+	}
+
+	// words[start .. start + count); the caller guarantees the range is inside the array
+	static string HashWords(array<int> words, int start, int count)
+	{
 		array<int> p = new array<int>();
-		p.Reserve(n + 17);
-		for (int i = 0; i < n; i++)
+		p.Reserve(count + 18);
+		int end = start + count;
+		for (int i = start; i < end; i++)
 		{
 			p.Insert(words.Get(i));
 		}
@@ -32,8 +38,8 @@ class DZOMS_Sha256
 		{
 			p.Insert(0);
 		}
-		p.Insert((n >> 27) & 31);
-		p.Insert(n << 5);
+		p.Insert((count >> 27) & 31);
+		p.Insert(count << 5);
 		return Digest(p);
 	}
 

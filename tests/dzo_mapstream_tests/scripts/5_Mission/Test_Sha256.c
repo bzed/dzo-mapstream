@@ -67,6 +67,22 @@ class DZOMS_Test_Sha256
 		DZOMS_T.Eq(DZOMS_Sha256.HashBytes(Bytes(Repeat("a", 56))), "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a", "bytes 56 x a");
 		DZOMS_T.Eq(DZOMS_Sha256.HashBytes(Bytes(Repeat("a", 64))), "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb", "bytes 64 x a");
 
+		array<int> counts = {1, 13, 14, 16, 17};
+		for (int c = 0; c < 5; c++)
+		{
+			array<int> framed = new array<int>();
+			framed.Insert(-1);
+			framed.Insert(-1);
+			framed.Insert(-1);
+			framed.Insert(-1);
+			framed.Insert(-1);
+			array<int> seq = Seq(counts.Get(c));
+			framed.InsertAll(seq);
+			framed.Insert(7);
+			DZOMS_T.Eq(DZOMS_Sha256.HashWords(framed, 5, counts.Get(c)), DZOMS_Sha256.HashWords(seq), "range of " + counts.Get(c).ToString() + " words at offset 5");
+		}
+		DZOMS_T.Eq(DZOMS_Sha256.HashWords(edge, 2, 0), empty, "range of 0 words");
+
 		DZOMS_T.EqInt(DZOMS_Sha256.Shr(-1, 28), 15, "Shr(-1, 28)");
 		DZOMS_T.EqInt(DZOMS_Sha256.Shr(1 << 31, 31), 1, "Shr(1<<31, 31)");
 		DZOMS_T.EqInt(DZOMS_Sha256.Shr(256, 4), 16, "Shr(256, 4)");

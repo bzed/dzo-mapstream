@@ -93,12 +93,14 @@ class DZOMS_Manifest
 	float viewDistance;
 	float proxyDistance;
 	bool disableCache;
+	ref array<int> cacheKey;	// 8 words, empty when disableCache is set (DESIGN 12.4)
 	ref array<float> bounds;	// x, y, z, radius per batch
 	ref array<string> hashes;	// lower-case hex SHA-256 per batch
 
 	void DZOMS_Manifest()
 	{
 		protocolVersion = DZOMS_Rpc.PROTOCOL_VERSION;
+		cacheKey = new array<int>();
 		bounds = new array<float>();
 		hashes = new array<string>();
 	}
@@ -110,7 +112,18 @@ class DZOMS_Manifest
 
 	bool IsValid()
 	{
-		if (!bounds || !hashes)
+		if (!bounds || !hashes || !cacheKey)
+		{
+			return false;
+		}
+		if (disableCache)
+		{
+			if (cacheKey.Count() != 0)
+			{
+				return false;
+			}
+		}
+		else if (cacheKey.Count() != DZOMS_CacheKey.WORDS)
 		{
 			return false;
 		}
