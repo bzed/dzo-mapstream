@@ -217,6 +217,7 @@ class DZOMS_Test_Hasher
 		DZOMS_T.Check(!b.IsValid(), "shorter positions invalid");
 
 		DZOMS_Manifest m = new DZOMS_Manifest();
+		m.cacheKey.InsertAll(DZOMS_Test_ClientDownload.TestKey());
 		DZOMS_T.EqInt(m.protocolVersion, DZOMS_Rpc.PROTOCOL_VERSION, "protocol version set");
 		m.hashes.Insert("aa");
 		m.bounds.Insert(1);

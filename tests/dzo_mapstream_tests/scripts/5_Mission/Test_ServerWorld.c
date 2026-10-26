@@ -149,6 +149,7 @@ class DZOMS_Test_ServerWorld
 		DZOMS_T.Check(m.IsValid(), "manifest valid");
 		DZOMS_T.EqFloat(m.viewDistance, 1500, "manifest viewDistance");
 		DZOMS_T.EqFloat(m.proxyDistance, 1000, "manifest proxyDistance");
+		DZOMS_T.EqInt(m.cacheKey.Count(), 8, "config without a key: random key in the manifest");
 		array<ref DZOMS_Batch> batches = world.GetBatches();
 		DZOMS_T.EqInt(m.Count(), batches.Count(), "one hash per batch");
 		int total = 0;
@@ -175,6 +176,30 @@ class DZOMS_Test_ServerWorld
 		again.Load();
 		DZOMS_T.Eq(again.GetDigest(), digest, "second world has the same digest");
 		again.Destroy();
+		DZOMS_NetworkRules.ClearTokenCache();
+
+		DZOMS_Config keyed = MakeConfig();
+		keyed.m_CacheKey = {5, 4, 3, 2, 1, 0, -1, -2};
+		DZOMS_ServerWorld keyedWorld = new DZOMS_ServerWorld(keyed, mapsDir, new DZOMS_ObjectProbeWorld());
+		keyedWorld.Load();
+		array<int> keyWords = keyedWorld.GetManifest().cacheKey;
+		DZOMS_T.EqInt(keyWords.Count(), 8, "manifest key has 8 words");
+		if (keyWords.Count() == 8)
+		{
+			DZOMS_T.EqInt(keyWords.Get(0), 5, "manifest key word 0 is the config's");
+			DZOMS_T.EqInt(keyWords.Get(7), -2, "manifest key word 7 is the config's");
+		}
+		keyedWorld.Destroy();
+		DZOMS_NetworkRules.ClearTokenCache();
+
+		DZOMS_Config nocache = MakeConfig();
+		nocache.m_CacheKey = {5, 4, 3, 2, 1, 0, -1, -2};
+		nocache.disableCache = true;
+		DZOMS_ServerWorld nocacheWorld = new DZOMS_ServerWorld(nocache, mapsDir, new DZOMS_ObjectProbeWorld());
+		nocacheWorld.Load();
+		DZOMS_T.EqInt(nocacheWorld.GetManifest().cacheKey.Count(), 0, "disableCache: no key in the manifest");
+		DZOMS_T.Check(nocacheWorld.GetManifest().IsValid(), "disableCache manifest valid");
+		nocacheWorld.Destroy();
 		DZOMS_NetworkRules.ClearTokenCache();
 	}
 }

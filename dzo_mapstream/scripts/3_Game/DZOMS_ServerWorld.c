@@ -512,6 +512,18 @@ class DZOMS_ServerWorld
 		m_Manifest.viewDistance = m_Config.viewDistance;
 		m_Manifest.proxyDistance = m_Config.proxyDistance;
 		m_Manifest.disableCache = m_Config.disableCache;
+		m_Manifest.cacheKey.Clear();
+		if (!m_Config.disableCache)
+		{
+			if (m_Config.m_CacheKey && m_Config.m_CacheKey.Count() == DZOMS_CacheKey.WORDS)
+			{
+				m_Manifest.cacheKey.InsertAll(m_Config.m_CacheKey);
+			}
+			else
+			{
+				m_Manifest.cacheKey.InsertAll(DZOMS_CacheKey.RandomWords(DZOMS_CacheKey.WORDS));
+			}
+		}
 		for (int b = 0; b < m_Batches.Count(); b++)
 		{
 			m_Manifest.hashes.Insert(DZOMS_BatchHasher.Hash(m_Batches.Get(b)));

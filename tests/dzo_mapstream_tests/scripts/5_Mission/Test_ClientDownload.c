@@ -19,12 +19,29 @@ class DZOMS_Test_ClientDownload
 		DZOMS_BatchBuilder.Build(list, 400, batches, bounds);
 	}
 
+	static array<int> TestKey()
+	{
+		return {11, -22, 33, -44, 55, -66, 77, -88};
+	}
+
+	static DZOMS_Manifest MakeManifestKey(array<ref DZOMS_Batch> batches, array<float> bounds, array<int> key)
+	{
+		DZOMS_Manifest m = MakeManifest(batches, bounds, false);
+		m.cacheKey.Clear();
+		m.cacheKey.InsertAll(key);
+		return m;
+	}
+
 	static DZOMS_Manifest MakeManifest(array<ref DZOMS_Batch> batches, array<float> bounds, bool disableCache)
 	{
 		DZOMS_Manifest m = new DZOMS_Manifest();
 		m.viewDistance = 1500;
 		m.proxyDistance = 1000;
 		m.disableCache = disableCache;
+		if (!disableCache)
+		{
+			m.cacheKey.InsertAll(TestKey());
+		}
 		for (int i = 0; i < bounds.Count(); i++)
 		{
 			m.bounds.Insert(bounds.Get(i));
@@ -91,6 +108,7 @@ class DZOMS_Test_ClientDownload
 		DZOMS_T.EqInt(Sent(w), 0, "nothing sent before IN_GAME");
 		Tick(w, 100, 1, "manifest request at 100");
 		Last(w, RM, DZOMS_Rpc.PROTOCOL_VERSION, "manifest request");
+		Last(w, RM, 3, "manifest request speaks protocol 3");
 		Tick(w, 1000, 1, "no request at 1000");
 		Tick(w, 3100, 2, "second manifest request at 3100");
 
@@ -98,6 +116,22 @@ class DZOMS_Test_ClientDownload
 		invalid.bounds.RemoveOrdered(0);
 		w.HandleManifest(invalid, 3200);
 		DZOMS_T.Check(w.GetManifest() == null, "invalid manifest ignored");
+		DZOMS_Manifest nokey = MakeManifest(sb, bo, false);
+		nokey.cacheKey.Clear();
+		w.HandleManifest(nokey, 3250);
+		DZOMS_T.Check(w.GetManifest() == null, "caching on without a key: manifest ignored");
+		DZOMS_Manifest keyoff = MakeManifest(sb, bo, true);
+		keyoff.cacheKey.InsertAll(TestKey());
+		w.HandleManifest(keyoff, 3260);
+		DZOMS_T.Check(w.GetManifest() == null, "caching off with a key: manifest ignored");
+		DZOMS_Manifest shortkey = MakeManifest(sb, bo, false);
+		shortkey.cacheKey.RemoveOrdered(0);
+		w.HandleManifest(shortkey, 3270);
+		DZOMS_T.Check(w.GetManifest() == null, "7 key words: manifest ignored");
+		DZOMS_Manifest nullkey = MakeManifest(sb, bo, false);
+		nullkey.cacheKey = null;
+		w.HandleManifest(nullkey, 3280);
+		DZOMS_T.Check(w.GetManifest() == null, "NULL key: manifest ignored");
 		Tick(w, 6200, 3, "third manifest request at 6200");
 
 		w.HandleManifest(good, 7000);
@@ -204,7 +238,7 @@ class DZOMS_Test_ClientDownload
 		DZOMS_ClientWorld w5 = new DZOMS_ClientWorld(path);
 		w5.m_Offline = true;
 		w5.Update("0 0 0", 0, true);
-		w5.HandleManifest(new DZOMS_Manifest(), 10);
+		w5.HandleManifest(MakeManifest(new array<ref DZOMS_Batch>(), new array<float>(), false), 10);
 		DZOMS_T.Check(w5.IsComplete(), "empty manifest completes at once");
 		DZOMS_T.Check(!FileExist(path), "empty manifest writes no file");
 
