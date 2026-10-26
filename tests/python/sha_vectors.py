@@ -85,7 +85,7 @@ def batch_words(types, entries):
         w += pack_string(t)
     w.append(len(entries))
     for ti, fl, pos, ori, sc in entries:
-        w += [ti, fl] + [rnd(v * 1000) for v in pos] + [rnd(v * 1000) for v in ori] + [rnd(sc * 10000)]
+        w += [ti, fl] + [rnd(v * 1024) for v in pos] + [rnd(v * 1000) for v in ori] + [rnd(sc * 10000)]
     return w
 
 

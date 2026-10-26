@@ -27,7 +27,7 @@ class DZOMS_Test_Proximity
 
 	static void RunProtocol()
 	{
-		DZOMS_T.EqInt(DZOMS_Rpc.PROTOCOL_VERSION, 2, "protocol version 2");
+		DZOMS_T.EqInt(DZOMS_Rpc.PROTOCOL_VERSION, 3, "protocol version 3");
 		DZOMS_T.EqInt(DZOMS_Rpc.OBJECTS_NETWORKED, 1146768645, "OBJECTS_NETWORKED id");
 		DZOMS_T.EqInt(DZOMS_Rpc.OBJECTS_LOCAL, 1146768646, "OBJECTS_LOCAL id");
 		DZOMS_T.EqInt(DZOMS_Rpc.LAST, DZOMS_Rpc.OBJECTS_LOCAL, "LAST covers the new ids");

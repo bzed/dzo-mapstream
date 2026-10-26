@@ -1,6 +1,10 @@
 // Batch -> list of 32-bit words (DESIGN.md 10.1) -> SHA-256. The caller guarantees IsValid().
 class DZOMS_BatchHasher
 {
+	// Positions are hashed in 1/1024 m. A power of two makes decode + encode exact at any map size
+	// (a word is < 2^23 below 8192 m and x * 1024 is an integer above), which the cache relies on.
+	static const int POSITION_SCALE = 1024;
+
 	// length, then the characters packed 4 per word (big endian, zero padded)
 	static void AppendString(array<int> words, string s)
 	{
@@ -24,6 +28,16 @@ class DZOMS_BatchHasher
 			word = word << (8 * (4 - filled));
 			words.Insert(word);
 		}
+	}
+
+	static int EncodePosition(float v)
+	{
+		return Math.Round(v * POSITION_SCALE);
+	}
+
+	static float DecodePosition(int w)
+	{
+		return w / 1024.0;
 	}
 
 	protected static int Milli(float v)
@@ -50,9 +64,9 @@ class DZOMS_BatchHasher
 			o = b.orientations.Get(i);
 			w.Insert(b.typeIndex.Get(i));
 			w.Insert(b.flags.Get(i));
-			w.Insert(Milli(p[0]));
-			w.Insert(Milli(p[1]));
-			w.Insert(Milli(p[2]));
+			w.Insert(EncodePosition(p[0]));
+			w.Insert(EncodePosition(p[1]));
+			w.Insert(EncodePosition(p[2]));
 			w.Insert(Milli(o[0]));
 			w.Insert(Milli(o[1]));
 			w.Insert(Milli(o[2]));
