@@ -74,7 +74,8 @@ dzo/mapstream/
   files anywhere. To remove a map, remove its file (or disable it, see below) and restart.
 - Changes to `config.json` or to the files in `DZE/` need a server restart.
 - Players do not need to configure anything. Their game keeps a cache in its own profile folder
-  (`dzo/mapstream/cache/`); deleting it makes the next join download everything again.
+  (`dzo/mapstream/cache/`); deleting it makes the next join download everything again. The file is
+  encrypted with a key the server sends, so a copy of it is useless without joining the server.
 
 ## Checking that it works
 
@@ -108,6 +109,7 @@ touched and no maps are loaded; the error is in the log. A complete example:
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
+    "cacheKey": "",
     "debugLog": false,
     "configVersion": 1
 }
@@ -125,6 +127,7 @@ A value of `0` (or a missing line) means "use the default".
 | `viewDistance` | Players see (and download) a batch of objects when they are closer than this many meters. 100 to 20000. | 1500 |
 | `proxyDistance` | Networked objects only exist for a player when they are fairly close (about 1000 m). Further away, the player sees a plain copy so the map does not have holes. 100 to 20000. | 1000 |
 | `batchSize` | Maximum objects per batch. 50 to 1000. | 400 |
+| `cacheKey` | 64 hex characters: the key the players' cache files are encrypted with. Empty = a key is generated once and kept in `dzo/mapstream/cachekey.bin` in the server profile; deleting that file makes every player download everything once. | generated |
 | `disableCache` | `true` = players do not keep a copy of the map; they download it on every join. | cache on |
 | `networkRadius` | Radius in meters around a player on foot in which objects become networked. 5 to 500. | 150 |
 | `vehicleRadius` | The same for a slow vehicle. 5 to 500. | 40 |

@@ -20,8 +20,8 @@ in-game tests and is described there, with the findings it rests on.
 5. Objects that need networking are chosen by readable rules (section 5).
 6. No unbounded work per frame, no unbounded memory, no trust in client input.
 
-Not in scope for the first version: other map formats, a download progress UI,
-cache encryption (planned, section 12).
+Not in scope for the first version: other map formats, a download progress UI.
+The client cache is encrypted with a key the server sends (section 12).
 
 ## 2. Dependencies and packaging
 
@@ -70,6 +70,7 @@ Server profile (`$profile:` = the `-profiles=` directory):
 dzo/mapstream/
   config.json          the configuration (section 5)
   DZE/                 every *.dze file in here is loaded (section 6.1)
+  cachekey.bin         the generated cache key (section 12.4); deleting it makes every client download everything once
 ```
 
 Client profile:
@@ -106,6 +107,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
     "proxyDistance": 0,
     "batchSize": 0,
     "disableCache": false,
+    "cacheKey": "",
     "debugLog": false,
     "configVersion": 1
 }
@@ -124,6 +126,7 @@ replaced by `-` (IPv6 addresses are not valid Windows file names).
 | `proxyDistance` | float, m | distance beyond which clients show proxies of networked objects | 1000 |
 | `batchSize` | int | max objects per batch (clamped to 50..1000) | 400 |
 | `disableCache` | bool | clients must not use or write a cache for this server | cache enabled |
+| `cacheKey` | string | 64 hex characters: the key the clients' cache files are encrypted with (12.4); invalid = config error, a generated key is used | generated once, kept in `cachekey.bin` |
 | `debugLog` | bool | log the networked report (5.5) and per-batch details | off |
 | `configVersion` | int | layout version of this file; written by the mod, admins do not edit it | version 1 (a file from before versioning) |
 | `networkRadius`, `vehicleRadius` | float, m | proximity networking: zone radius of a player on foot / in a slow vehicle (clamped 5..500) | 150 / 40 |
@@ -385,10 +388,11 @@ while flat arrays round-trip bit-exactly through `FileSerializer` and `ScriptRPC
 ```c
 class DZOMS_Manifest
 {
-    int protocolVersion;            // 2 (the two object messages of section 13.5)
+    int protocolVersion;            // 3 (2 added the two object messages of section 13.5, 3 the cache key)
     float viewDistance;
     float proxyDistance;
     bool disableCache;
+    ref array<int> cacheKey;        // 8 words, empty when disableCache is set
     ref array<float> bounds;        // x, y, z, radius per batch
     ref array<string> hashes;       // lower-case hex SHA-256 per batch
 }
@@ -405,7 +409,9 @@ class DZOMS_Batch
 }
 ```
 
-A client with a different `protocolVersion` gets no manifest and logs why.
+`DZOMS_Manifest.IsValid()` also requires `cacheKey` to have 8 words when caching is on and none when
+`disableCache` is set; a client ignores any other manifest and keeps requesting. A client with a
+different `protocolVersion` gets no manifest and logs why.
 Server and clients must run the same mod version.
 
 ## 8. Client: download
@@ -414,19 +420,21 @@ Owned by `DZOMS_ClientWorld`, created in `MissionGameplay.OnInit()`, updated fro
 `MissionGameplay.OnUpdate()`, destroyed in `MissionGameplay.OnMissionFinish()`
 (deletes every object it spawned). On the dedicated server none of this exists.
 
-1. **Cache load** (constructor): read the cache file (10.2), hash every batch, keep
-   them in `map<string hash, ref DZOMS_Batch>`. Takes about 25 ms for 23 batches.
-   If `GetHostAddress()` fails this early (not verified on a client yet), load the
-   cache when the manifest arrives instead, before using it.
+1. **Constructor**: remembers the cache path only. The cache is encrypted with the key from the
+   manifest, so it is read when the manifest arrives (step 3).
 2. **Manifest request**: on the first `OnUpdate` with
    `g_Game.GetGameState() == DayZGameState.IN_GAME`, then every 3 s until a
    manifest arrived.
 3. **Manifest received** (only the first one is used):
    - store settings and bounds; validate `bounds.Count() == 4 * hashes.Count()`,
      otherwise ignore the manifest and keep requesting;
-   - unless `disableCache`: for every batch whose hash is in the cache, use the
-     cached batch (set its `index`), closest first;
-   - drop the cache map;
+   - unless `disableCache`: read the cache file with `manifest.cacheKey` (12.5), hash the word
+     range of every cached batch in place (`DZOMS_Sha256.HashWords(words, start, count)`, no copy)
+     into a `map<string hash, int range>`; for every manifest batch whose hash is in the map,
+     decode that range (`DZOMS_BatchHasher.Decode`), keep its words unchanged next to it (set its
+     `index`). A different key (the server's key changed), another cache version or a broken file
+     is logged as one line and means a plain download, not an error;
+   - drop the cache words and map;
    - start downloading.
 4. **Download loop**, at most one request in flight:
    - pick the not yet received batch with the smallest
@@ -438,7 +446,8 @@ Owned by `DZOMS_ClientWorld`, created in `MissionGameplay.OnInit()`, updated fro
    - timeout 5 s: request the same batch again; after 5 consecutive timeouts wait
      30 s, then continue. Never give up for good.
 5. **All received**: unless `disableCache` or nothing was downloaded, write the cache
-   file with all batches in manifest order. If `disableCache` is set and a cache
+   file with every batch's stored words in manifest order, encrypted with `manifest.cacheKey` and a
+   fresh random nonce. If `disableCache` is set and a cache
    file exists, delete it.
 
 The camera position (`g_Game.GetCurrentCameraPosition()`) is used everywhere, so
@@ -524,13 +533,23 @@ typeCount
 per type:   length, then the characters packed 4 per word (big endian, zero padded)
 objectCount
 per object: typeIndex, flags,
-            round(pos.x * 1000), round(pos.y * 1000), round(pos.z * 1000),
+            round(pos.x * 1024), round(pos.y * 1024), round(pos.z * 1024),
             round(ori.x * 1000), round(ori.y * 1000), round(ori.z * 1000),
             round(scale * 10000)
 ```
 
 Rounding is needed because Enforce cannot read a float's bits; client and server
-hash the same transmitted floats, so they always get the same words. The batch
+hash the same transmitted floats, so they always get the same words. Positions are in
+1/1024 m, not millimetres, so that a batch decoded from its words encodes to the same
+words again (the cache stores words and decodes them; 12.3). With `* 1000` a word
+decoded to a float32 and encoded again differed from the original for some positions
+beyond 8192 m (755 of 400000 random positions within +-25 km in a float32 simulation;
+Chernarus is 15.4 km wide). With a power of two the round trip is exact for every word
+the server produces: below 8192 m the word is below 2^23 and converts to float exactly;
+from 8192 m on `x * 1024` is already an integer with at most 24 significant bits, and
+multiplying or dividing by 1024 never rounds (0 of 400000 unstable, largest position
+error 0.49 mm). Orientations (`* 1000`, below 8192) and scale (`* 10000`, below 20)
+round-trip as they are. The batch
 `index` is not hashed: cached batches are matched by content, so a map update only
 downloads the batches that changed.
 
@@ -542,18 +561,12 @@ word input, including 13, 14 and 16 words (padding edge cases).
 
 ### 10.2 Cache file
 
-Written with `FileSerializer`:
-
-```
-int  cacheVersion          // 1
-int  batchCount
-DZOMS_Batch per batch       // the flat class from section 7
-```
-
-Reading: version mismatch, short file or any failed `Read()` -> the whole file is
-discarded (no partial use). Every batch is still hash-checked against the
-manifest, so bit flips only cause a re-download of the affected batch. Measured:
-about 100 KB for 1229 objects, write about 3 ms, read about 1 ms.
+Version 2, the format of 12.5: version, nonce, and one ChaCha20-encrypted word array holding
+the hash words of every batch. A version 1 file (written by earlier releases) is rejected
+and replaced after the next download. Reading: version mismatch, a failed read, a wrong
+check word (another key), an impossible count or leftover words -> the whole file is
+discarded (no partial use). Every batch is still hash-checked against the manifest, so a
+flipped word only causes a re-download of its batch.
 
 ## 11. Tests
 
@@ -569,8 +582,11 @@ Server, headless, before every release:
    `GetObjectByNetworkId()` resolves back to it; no local object has one;
    `!` overrides, per-map rules, `@doors`, `@ladders` each covered.
 5. Cache: round trip matches all hashes; a moved (1 cm), renamed, re-flagged or
-   removed object changes the hash; truncated, wrong version, random and missing
-   files are rejected without script errors; one flipped byte rejects one batch.
+   removed object changes the hash; truncated, wrong version (including a version 1
+   file), wrong key, random and missing files are rejected without script errors;
+   one flipped word rejects one batch. ChaCha20 against RFC 8439 2.3.2 and a Python
+   reference, SHA-256 over a range, positions beyond 8192 m through write -> read ->
+   write -> read, the key (generated once, `cacheKey` set, invalid, broken key file).
 6. Hidden objects are suppressed on the server.
 7. Client code compiles: build a test PBO with `#ifdef SERVER` / `#ifndef SERVER`
    swapped and boot it on the server.
@@ -592,9 +608,9 @@ Client, in game (cannot be automated):
    `proxyDistance` without gaps or doubles.
 5. Hidden world objects are hidden.
 
-## 12. Planned: cache encryption
+## 12. Cache encryption
 
-Not part of the first version; a plan ready to implement. ChaCha20 in Enforce
+Implemented (protocol 3, cache version 2). ChaCha20 in Enforce
 Script with a key the server sends in the manifest (never stored on the client) and
 a random nonce in the cache header; the cache stored as one encrypted word array.
 Integrity stays with the per-batch SHA-256. `disableCache` covers maps that must not
@@ -608,7 +624,7 @@ off a disk (or passed around) is useless without joining the server. A generated
 key's entropy is mostly the creation time (12.4); an admin-set key is the strong
 option.
 
-### 12.2 Measurements (prototype, 1.29 server, 110000 words = about 12k objects)
+### 12.2 Measurements (prototype, 110000 words = about 12k objects)
 
 `TickCount()` returns microseconds (calibrated: 2000002 ticks in 2 s of UTC time).
 
@@ -619,7 +635,12 @@ option.
 | `FileSerializer` read of one `array<int>` | 2.6 ms (write 55 ms) |
 | `int.AsciiToString()` | about 65 ns per character |
 
-For the 1229-object test maps ChaCha20 adds about 5 ms. Loading still gets faster
+For the 1229-object test maps ChaCha20 adds about 5 ms.
+
+Real client (1.30, `tests/dze`, 3 batches), three joins in a row on one server: join 1 "cache: not used,
+no file yet", 3 downloaded in 120 ms, cache written; join 2 "cache: 3 batches read", 3 from the cache, read,
+hash and decode within the same log millisecond; join 3 after deleting `cachekey.bin`: "cache: not used, the
+server's key changed", 3 downloaded in 184 ms, cache rewritten. No `failed validation` line and no script error. Loading still gets faster
 than today: the hash input is stored directly (12.3), so no string is read
 character by character (`ToAscii()`, about 2 us per character, section 14).
 
@@ -630,15 +651,14 @@ The plaintext of a batch in the cache is exactly its hash input from 10.1
 word. Loading hashes these words directly and decodes a batch only when its hash is
 in the manifest.
 
-The words must be kept and written back unchanged; **decoded floats must never be
-re-encoded**. Simulated in float32 (Enforce `float`): `round(float(w / 1000.0) * 1000) == w`
-holds for every |w| up to 8192011 (8192 m) but fails for about 9% of the values
-between 8192 m and 20 km. A batch re-encoded from decoded floats would fail its hash
-on the next join. Scale (`/ 10000`, values up to 20) round-trips exactly.
+The words are kept and written back unchanged (`DZOMS_ClientBatch.words`), which is also faster
+than decoding and encoding again: `AppendString` reads strings character by character. Since
+positions are hashed in 1/1024 m (10.1), decoding and encoding again would give the same words
+anyway, at any map size.
 
 Decoding (`DZOMS_BatchHasher.Decode(words, start, count)` -> `DZOMS_Batch`): check
 every count and string length against the remaining words before using it, names via
-`AsciiToString()` per byte, positions and orientations `/ 1000.0`, scale `/ 10000.0`.
+`AsciiToString()` per byte, positions `/ 1024.0`, orientations `/ 1000.0`, scale `/ 10000.0`.
 Batches whose words hash to a manifest hash are exactly what the server produced,
 so the checks only guard against bugs.
 
@@ -678,19 +698,20 @@ Write the state as 16 locals and the 8 quarter rounds out in full (as in
 `n`: `(x << n) | ((x >> (32 - n)) & ((1 << n) - 1))`. Constants
 `1634760805, 857760878, 2036477234, 1797285236`.
 
-Protocol 2: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
-`disableCache` is set). Bump `PROTOCOL_VERSION` and `CACHE_VERSION` to 2.
+Protocol 3: `DZOMS_Manifest` gets `ref array<int> cacheKey` (8 ints, empty when
+`disableCache` is set). `PROTOCOL_VERSION` goes from 2 (proximity messages, section 13.5) to 3,
+`CACHE_VERSION` from 1 to 2. (The first plan said "bump to 2"; the protocol was already 2.)
 
-### 12.6 Changes
+### 12.6 Changes (as implemented)
 
 | Where | Change |
 |---|---|
-| new `DZOMS_ChaCha20` (3_Game) | `Block(key, nonce, counter, dst)`, `XorWords(key, nonce, words)` |
+| new `DZOMS_ChaCha20`, `DZOMS_CacheKey` (3_Game) | `Block(key, nonce, counter, dst)`, `XorWords(key, nonce, words)` |
 | `DZOMS_Sha256` | hash a range of a larger array (`HashWords(words, start, count)`), no copy per batch |
 | `DZOMS_BatchHasher` | `Decode()` (12.3) |
 | `DZOMS_Cache` | version 2 (12.5); reads and writes per-batch word arrays, takes the key |
 | `DZOMS_Manifest`, `DZOMS_Rpc` | `cacheKey`, versions 2 |
-| `DZOMS_Config` + key file | `cacheKey`, generate / load the key (12.4) |
+| `DZOMS_Config`, `DZOMS_CacheKey` + key file | `cacheKey`; `DZOMS_CacheKey` parses it, generates the key words (also the client's nonces) and keeps `cachekey.bin` (12.4) |
 | `DZOMS_ServerWorld` | key into the manifest |
 | `DZOMS_ClientWorld` | load the cache only when the manifest arrives (the key comes with it; the constructor preload in 8.1 goes away); `DZOMS_ClientBatch` keeps its words (`HandleBatch` already builds them for the hash: keep them); `Complete()` writes the stored words |
 | docs | sections 4, 5, 7, 8, 10.2; `cacheKey` in the README |
@@ -1167,13 +1188,15 @@ around six rocks):
 
 | Module | Class | Responsibility |
 |---|---|---|
-| 3_Game | `DZOMS_Sha256` | word hashing |
+| 3_Game | `DZOMS_Sha256` | word hashing (also over a range of a larger array) |
+| 3_Game | `DZOMS_ChaCha20` | RFC 8439 block function, XOR over int words (cache encryption) |
+| 3_Game | `DZOMS_CacheKey` | random words, hex key parsing, `cachekey.bin` |
 | 3_Game | `DZOMS_Rpc` | RPC ids, protocol version |
 | 3_Game | `DZOMS_Config`, `DZOMS_MapEntry` | JSON model, load, normalize, default file |
 | 3_Game | `DZOMS_Glob` | pattern matching |
 | 3_Game | `DZOMS_Batch`, `DZOMS_Manifest` | transfer and cache data |
-| 3_Game | `DZOMS_BatchHasher` | words + hash of a batch |
-| 3_Game | `DZOMS_Cache` | read / write the cache file |
+| 3_Game | `DZOMS_BatchHasher` | words + hash of a batch, `Decode` back from the words |
+| 3_Game | `DZOMS_Cache` | read / write the encrypted cache file |
 | 3_Game | `DZOMS_NetworkRules` | rule lists, `@doors` / `@ladders` on `Building`, `@actions` through `DZOMS_ObjectProbe` |
 | 3_Game | `DZOMS_ObjectProbe` | interface for checks that need 4_World classes |
 | 4_World | `DZOMS_ObjectProbeWorld` | implements `HasOwnActions()` and `IsFixedItem()` |
