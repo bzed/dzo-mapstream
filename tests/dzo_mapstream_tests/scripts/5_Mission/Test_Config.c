@@ -194,6 +194,8 @@ class DZOMS_Test_Config
 		WriteText(dir + "/" + DZOMS_CacheKey.FILE, "this is not a key file");
 		c = DZOMS_Config.Load(dir);
 		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8 && !AllZero(c.m_CacheKey), "text file: new key");
+		c2 = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(SameKey(c.m_CacheKey, c2.m_CacheKey), "text file: replaced, later load returns the new key");
 
 		// a set key is used and no file is made
 		dir = CaseDir("key_set");

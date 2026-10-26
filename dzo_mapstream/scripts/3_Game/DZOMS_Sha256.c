@@ -27,7 +27,7 @@ class DZOMS_Sha256
 	static string HashWords(array<int> words, int start, int count)
 	{
 		array<int> p = new array<int>();
-		p.Reserve(count + 17);
+		p.Reserve(count + 18);
 		int end = start + count;
 		for (int i = start; i < end; i++)
 		{

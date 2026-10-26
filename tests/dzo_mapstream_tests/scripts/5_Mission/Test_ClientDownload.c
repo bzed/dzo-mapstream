@@ -274,6 +274,7 @@ class DZOMS_Test_ClientDownload
 		w1b.Update("2000 10 0", 0, true);
 		DZOMS_T.EqInt(w1b.GetFromCacheCount(), 0, "constructor reads nothing");
 		DZOMS_T.Check(FileExist(path), "constructor leaves the file");
+		DZOMS_T.Check(DZOMS_Test_Config.ReadText(path) == fileBefore, "constructor leaves the file unchanged");
 
 		// same server again: everything from the cache
 		DZOMS_ClientWorld w2 = new DZOMS_ClientWorld(path);
