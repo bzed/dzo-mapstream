@@ -68,9 +68,103 @@ class DZOMS_Test_Hasher
 		DZOMS_T.EqFloat(DZOMS_BatchHasher.DecodePosition(1024256), 1000.25, "DecodePosition 1024256");
 	}
 
+	static bool SameWords(array<int> a, array<int> b)
+	{
+		if (a.Count() != b.Count())
+		{
+			return false;
+		}
+		for (int i = 0; i < a.Count(); i++)
+		{
+			if (a.Get(i) != b.Get(i))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// words of the reference batch with one word replaced
+	static array<int> WithWord(int index, int value)
+	{
+		array<int> w = DZOMS_BatchHasher.Words(Reference());
+		w.Set(index, value);
+		return w;
+	}
+
+	static void DecodeTests()
+	{
+		array<int> good = DZOMS_BatchHasher.Words(Reference());
+		int n = good.Count();
+		DZOMS_Batch d = DZOMS_BatchHasher.Decode(good, 0, n);
+		DZOMS_T.Check(d != null, "decode reference");
+		if (d)
+		{
+			DZOMS_T.Check(SameWords(DZOMS_BatchHasher.Words(d), good), "decode + words equal the input");
+			DZOMS_T.Eq(d.GetType(0), "Land_Lighthouse", "decoded type 0");
+			DZOMS_T.Eq(d.GetType(2), MODEL, "decoded type 2");
+			DZOMS_T.EqInt(d.Count(), 3, "decoded count");
+			DZOMS_T.Check(d.IsNetworked(0), "decoded flag");
+			DZOMS_T.EqInt(d.index, 0, "decoded index is 0");
+		}
+
+		array<int> framed = new array<int>();
+		framed.Insert(-5);
+		framed.Insert(99);
+		framed.InsertAll(good);
+		framed.Insert(1);
+		DZOMS_Batch inner = DZOMS_BatchHasher.Decode(framed, 2, n);
+		DZOMS_T.Check(inner != null && SameWords(DZOMS_BatchHasher.Words(inner), good), "decode inside a larger array");
+
+		DZOMS_Batch pad = new DZOMS_Batch();
+		pad.Add("a", "1 2 3", "0 0 0", 1, 0);
+		pad.Add("abcd", "1 2 3", "0 0 0", 1, 0);
+		pad.Add("abcde", "1 2 3", "0 0 0", 1, 0);
+		array<int> pw = DZOMS_BatchHasher.Words(pad);
+		DZOMS_Batch pd = DZOMS_BatchHasher.Decode(pw, 0, pw.Count());
+		DZOMS_T.Check(pd != null, "decode types of 1, 4 and 5 characters");
+		if (pd)
+		{
+			DZOMS_T.Eq(pd.GetType(0), "a", "1 character");
+			DZOMS_T.Eq(pd.GetType(1), "abcd", "4 characters");
+			DZOMS_T.Eq(pd.GetType(2), "abcde", "5 characters");
+		}
+
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(good, 0, n - 1) == null, "one word short");
+		array<int> longer = new array<int>();
+		longer.InsertAll(good);
+		longer.Insert(0);
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(longer, 0, n + 1) == null, "one word too many");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(1, 1000), 0, n) == null, "type length past the words");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(1, 0), 0, n) == null, "type length 0");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(1, -3), 0, n) == null, "negative type length");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(0, -1), 0, n) == null, "negative type count");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(0, 5000), 0, n) == null, "type count past the words");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(good, 0, -1) == null, "negative count");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(good, -1, n) == null, "negative start");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(good, 0, 0) == null, "no words");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(15, 2), 0, n) == null, "object count too small");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(15, 4), 0, n) == null, "object count too big");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(15, -1), 0, n) == null, "negative object count");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(15, 2147483647), 0, n) == null, "huge object count");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(16, 2), 0, n) == null, "typeIndex == type count");
+		DZOMS_T.Check(DZOMS_BatchHasher.Decode(WithWord(16, -1), 0, n) == null, "negative typeIndex");
+
+		DZOMS_Batch far = new DZOMS_Batch();
+		far.Add(MODEL, "8192.021484375 8192.021484375 8192.021484375", "10 20 30", 1.25, 0);
+		far.Add(MODEL, "15359.999 15359.999 15359.999", "-45.5 1.25 0", 0.75, 1);
+		far.Add(MODEL, "-16384.001 -16384.001 -16384.001", "0 0 0", 1, 2);
+		far.Add(MODEL, "8192.021484375 15359.999 -16384.001", "0 0 0", 1, 0);
+		far.Add(MODEL, "-16384.001 8192.021484375 15359.999", "0 0 0", 1, 0);
+		array<int> fw = DZOMS_BatchHasher.Words(far);
+		DZOMS_Batch fd = DZOMS_BatchHasher.Decode(fw, 0, fw.Count());
+		DZOMS_T.Check(fd != null && SameWords(DZOMS_BatchHasher.Words(fd), fw), "positions beyond 8192 m survive decode + words");
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("hasher");
+		DecodeTests();
 		PositionRoundTrip();
 		DZOMS_Batch b = Reference();
 		DZOMS_T.EqInt(MODEL.Length(), 32, "model path length");
