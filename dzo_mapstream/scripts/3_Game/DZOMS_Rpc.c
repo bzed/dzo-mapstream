@@ -12,5 +12,5 @@ class DZOMS_Rpc
 	const int LAST = 1146768646;
 
 	const int PROTOCOL_VERSION = 3;
-	const int CACHE_VERSION = 1;
+	const int CACHE_VERSION = 2;
 }

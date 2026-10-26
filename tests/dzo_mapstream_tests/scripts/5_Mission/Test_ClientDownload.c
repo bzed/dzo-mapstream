@@ -87,6 +87,77 @@ class DZOMS_Test_ClientDownload
 		DZOMS_T.EqInt(Sent(w), expectSent, what);
 	}
 
+	// positions beyond 8192 m: write -> read -> write -> read keeps every hash
+	static void BeyondEightKm()
+	{
+		string far = DZOMS_T.DIR + "/client_cache_far.bin";
+		DeleteFile(far);
+		array<ref DZOMS_Batch> fb = new array<ref DZOMS_Batch>();
+		array<float> fo = new array<float>();
+		for (int g = 0; g < 3; g++)
+		{
+			DZOMS_Batch fbatch = new DZOMS_Batch();
+			fbatch.Add("Apple", Vector(8192.021484375 + g * 3000, 10, 15359.999 - g * 7000), "0 0 0", 1, 0);
+			fbatch.Add("Apple", Vector(15359.999 - g * 5000, -16384.001, 8192.021484375), "10 20 30", 1.25, 0);
+			fb.Insert(fbatch);
+			fo.Insert(8192 + g * 3000);
+			fo.Insert(10);
+			fo.Insert(15359 - g * 7000);
+			fo.Insert(100);
+		}
+		DZOMS_T.EqInt(fb.Count(), 3, "far: 3 batches");
+
+		DZOMS_ClientWorld first = new DZOMS_ClientWorld(far);
+		first.m_Offline = true;
+		first.Update("0 0 0", 0, true);
+		first.HandleManifest(MakeManifest(fb, fo, false), 10);
+		for (int i = 0; i < fb.Count(); i++)
+		{
+			DZOMS_Batch c = Clone(fb.Get(i));
+			c.index = i;
+			first.HandleBatch(c, 20 + i);
+		}
+		DZOMS_T.Check(first.IsComplete(), "far: first world downloads everything");
+		DZOMS_T.EqInt(first.GetFromCacheCount(), 0, "far: nothing from the cache at first");
+
+		// second world: a 4th batch is new, the 3 old ones come from the cache and are written back with it
+		array<ref DZOMS_Batch> fb2 = new array<ref DZOMS_Batch>();
+		array<float> fo2 = new array<float>();
+		for (int k = 0; k < fb.Count(); k++)
+		{
+			fb2.Insert(fb.Get(k));
+		}
+		for (int q = 0; q < fo.Count(); q++)
+		{
+			fo2.Insert(fo.Get(q));
+		}
+		DZOMS_Batch extra = Clone(fb.Get(0));
+		extra.positions.Set(0, extra.positions.Get(0) + "1 0 0");
+		fb2.Insert(extra);
+		for (int e = 0; e < 4; e++)
+		{
+			fo2.Insert(fo.Get(e));
+		}
+		DZOMS_ClientWorld second = new DZOMS_ClientWorld(far);
+		second.m_Offline = true;
+		second.Update("0 0 0", 0, true);
+		second.HandleManifest(MakeManifest(fb2, fo2, false), 10);
+		DZOMS_T.EqInt(second.GetFromCacheCount(), 3, "far: second world takes 3 from the cache");
+		DZOMS_Batch extraCopy = Clone(extra);
+		extraCopy.index = 3;
+		second.HandleBatch(extraCopy, 30);
+		DZOMS_T.Check(second.IsComplete(), "far: second world complete");
+
+		// third world: everything, including the words that went file -> memory -> file, from the cache
+		DZOMS_ClientWorld third = new DZOMS_ClientWorld(far);
+		third.m_Offline = true;
+		third.Update("0 0 0", 0, true);
+		third.HandleManifest(MakeManifest(fb2, fo2, false), 10);
+		DZOMS_T.EqInt(third.GetFromCacheCount(), 4, "far: third world takes all 4 from the cache");
+		DZOMS_T.Check(third.IsComplete(), "far: third world complete");
+		DeleteFile(far);
+	}
+
 	static void Run()
 	{
 		DZOMS_T.Suite("clientdownload");
@@ -196,6 +267,14 @@ class DZOMS_Test_ClientDownload
 		DZOMS_T.EqInt(w.GetDownloadedCount(), 3, "3 downloaded");
 		DZOMS_T.Check(FileExist(path), "cache file written");
 
+		// the constructor does not read the cache (the key arrives with the manifest)
+		string fileBefore = DZOMS_Test_Config.ReadText(path);
+		DZOMS_ClientWorld w1b = new DZOMS_ClientWorld(path);
+		w1b.m_Offline = true;
+		w1b.Update("2000 10 0", 0, true);
+		DZOMS_T.EqInt(w1b.GetFromCacheCount(), 0, "constructor reads nothing");
+		DZOMS_T.Check(FileExist(path), "constructor leaves the file");
+
 		// same server again: everything from the cache
 		DZOMS_ClientWorld w2 = new DZOMS_ClientWorld(path);
 		w2.m_Offline = true;
@@ -217,6 +296,80 @@ class DZOMS_Test_ClientDownload
 		DZOMS_T.EqInt(w3.GetFromCacheCount(), 2, "2 batches from the cache");
 		DZOMS_T.Check(!w3.IsComplete(), "not complete");
 		Last(w3, RB, 0, "changed batch requested");
+		DZOMS_Batch changed0 = Clone(sb3.Get(0));
+		changed0.index = 0;
+		w3.HandleBatch(changed0, 30);
+		DZOMS_T.Check(w3.IsComplete(), "world with a changed batch completes");
+		DZOMS_T.EqInt(w3.GetDownloadedCount(), 1, "1 downloaded");
+		DZOMS_ClientWorld w3b = new DZOMS_ClientWorld(path);
+		w3b.m_Offline = true;
+		w3b.Update("0 10 0", 0, true);
+		w3b.HandleManifest(MakeManifest(sb3, bo3, false), 10);
+		DZOMS_T.EqInt(w3b.GetFromCacheCount(), 3, "mixed write: all 3 from the cache");
+		DZOMS_T.Check(w3b.IsComplete(), "mixed write: complete");
+
+		// another key: nothing from the cache, everything requested, the file is rewritten with the new key
+		array<int> key2 = {9, 8, 7, 6, 5, 4, 3, 2};
+		DZOMS_ClientWorld wk = new DZOMS_ClientWorld(path);
+		wk.m_Offline = true;
+		wk.Update("0 10 0", 0, true);
+		wk.HandleManifest(MakeManifestKey(sb3, bo3, key2), 10);
+		DZOMS_T.EqInt(wk.GetFromCacheCount(), 0, "other key: nothing from the cache");
+		DZOMS_T.Check(!wk.IsComplete(), "other key: not complete");
+		for (int ki = 0; ki < 3; ki++)
+		{
+			DZOMS_Batch kb = Clone(sb3.Get(ki));
+			kb.index = ki;
+			wk.HandleBatch(kb, 40 + ki);
+		}
+		DZOMS_T.Check(wk.IsComplete(), "other key: complete after the downloads");
+		DZOMS_ClientWorld wk2 = new DZOMS_ClientWorld(path);
+		wk2.m_Offline = true;
+		wk2.Update("0 10 0", 0, true);
+		wk2.HandleManifest(MakeManifestKey(sb3, bo3, key2), 10);
+		DZOMS_T.EqInt(wk2.GetFromCacheCount(), 3, "new key: all 3 from the rewritten cache");
+
+		// a version 1 file: ignored, replaced by a version 2 file
+		FileSerializer v1 = new FileSerializer();
+		if (v1.Open(path, FileMode.WRITE))
+		{
+			v1.Write(1);
+			v1.Write(3);
+			v1.Write(sb3.Get(0));
+			v1.Write(sb3.Get(1));
+			v1.Write(sb3.Get(2));
+			v1.Close();
+		}
+		DZOMS_ClientWorld wv = new DZOMS_ClientWorld(path);
+		wv.m_Offline = true;
+		wv.Update("0 10 0", 0, true);
+		wv.HandleManifest(MakeManifest(sb3, bo3, false), 10);
+		DZOMS_T.EqInt(wv.GetFromCacheCount(), 0, "version 1 file: nothing from the cache");
+		for (int vi = 0; vi < 3; vi++)
+		{
+			DZOMS_Batch vb = Clone(sb3.Get(vi));
+			vb.index = vi;
+			wv.HandleBatch(vb, 50 + vi);
+		}
+		DZOMS_T.Check(wv.IsComplete(), "version 1 file: complete after the downloads");
+		DZOMS_ClientWorld wv2 = new DZOMS_ClientWorld(path);
+		wv2.m_Offline = true;
+		wv2.Update("0 10 0", 0, true);
+		wv2.HandleManifest(MakeManifest(sb3, bo3, false), 10);
+		DZOMS_T.EqInt(wv2.GetFromCacheCount(), 3, "version 2 file written after the downloads");
+
+		// restore the file the following parts expect: the cache of sb (batch 0 unchanged)
+		DeleteFile(path);
+		DZOMS_ClientWorld wr = new DZOMS_ClientWorld(path);
+		wr.m_Offline = true;
+		wr.Update("0 10 0", 0, true);
+		wr.HandleManifest(MakeManifest(sb, bo, false), 10);
+		for (int ri = 0; ri < 3; ri++)
+		{
+			DZOMS_Batch rb = Clone(sb.Get(ri));
+			rb.index = ri;
+			wr.HandleBatch(rb, 60 + ri);
+		}
 
 		// disableCache: file deleted, nothing used, nothing written
 		DZOMS_ClientWorld w4 = new DZOMS_ClientWorld(path);
@@ -233,6 +386,8 @@ class DZOMS_Test_ClientDownload
 		}
 		DZOMS_T.Check(w4.IsComplete(), "disableCache world complete");
 		DZOMS_T.Check(!FileExist(path), "disableCache: still no file");
+
+		BeyondEightKm();
 
 		// empty manifest
 		DZOMS_ClientWorld w5 = new DZOMS_ClientWorld(path);

@@ -8,6 +8,7 @@ class DZOMS_ClientBatch
 	static const int UNLOADING = 4;
 
 	ref DZOMS_Batch data;
+	ref array<int> words;	// the batch's hash words, written back to the cache unchanged
 	int state;
 	vector center;
 	float radius;
@@ -18,9 +19,10 @@ class DZOMS_ClientBatch
 	int cursor;
 	int unloadCursor;
 
-	void SetData(DZOMS_Batch b)
+	void SetData(DZOMS_Batch b, array<int> batchWords)
 	{
 		data = b;
+		words = batchWords;
 		state = UNLOADED;
 		objects = new array<Object>();
 		proxies = new array<Object>();
@@ -96,8 +98,11 @@ class DZOMS_ClientWorld
 	ref array<int> m_SentValues = new array<int>();
 
 	protected string m_CachePath;
-	protected bool m_CacheLoaded;
-	protected ref map<string, ref DZOMS_Batch> m_Cache = new map<string, ref DZOMS_Batch>();
+	// the cache file, read when the manifest arrives: decrypted words, and range number by range hash
+	protected ref array<int> m_CacheWords = new array<int>();
+	protected ref array<int> m_CacheStarts = new array<int>();
+	protected ref array<int> m_CacheCounts = new array<int>();
+	protected ref map<string, int> m_Cache = new map<string, int>();
 
 	protected ref DZOMS_Manifest m_Manifest;
 	protected ref array<ref DZOMS_ClientBatch> m_Batches = new array<ref DZOMS_ClientBatch>();
@@ -129,10 +134,6 @@ class DZOMS_ClientWorld
 	void DZOMS_ClientWorld(string cachePath)
 	{
 		m_CachePath = cachePath;
-		if (m_CachePath != "")
-		{
-			LoadCache();
-		}
 	}
 
 	// "" if the host address is not known (yet)
@@ -188,20 +189,33 @@ class DZOMS_ClientWorld
 		return m_InFlight;
 	}
 
-	protected void LoadCache()
+	// the key comes with the manifest, so the file is read then
+	protected void LoadCache(array<int> key)
 	{
-		m_CacheLoaded = true;
-		array<ref DZOMS_Batch> list = new array<ref DZOMS_Batch>();
-		if (!DZOMS_Cache.Read(m_CachePath, list))
+		int reason;
+		if (!DZOMS_Cache.Read(m_CachePath, key, m_CacheWords, m_CacheStarts, m_CacheCounts, reason))
 		{
+			string why = "the file is broken";
+			if (reason == DZOMS_Cache.REASON_MISSING)
+			{
+				why = "no file yet";
+			}
+			else if (reason == DZOMS_Cache.REASON_VERSION)
+			{
+				why = "another cache version";
+			}
+			else if (reason == DZOMS_Cache.REASON_KEY)
+			{
+				why = "the server's key changed";
+			}
+			DZOMS_Log.Info("cache: not used, " + why + " (" + m_CachePath + ")");
 			return;
 		}
-		for (int i = 0; i < list.Count(); i++)
+		for (int i = 0; i < m_CacheStarts.Count(); i++)
 		{
-			string hash = DZOMS_BatchHasher.Hash(list.Get(i));
-			m_Cache.Set(hash, list.Get(i));
+			m_Cache.Set(DZOMS_Sha256.HashWords(m_CacheWords, m_CacheStarts.Get(i), m_CacheCounts.Get(i)), i);
 		}
-		DZOMS_Log.Info("cache: " + list.Count().ToString() + " batches read from " + m_CachePath);
+		DZOMS_Log.Info("cache: " + m_CacheStarts.Count().ToString() + " batches read from " + m_CachePath);
 	}
 
 	protected void Send(int rpcType, int value)
@@ -1199,9 +1213,9 @@ class DZOMS_ClientWorld
 		{
 			m_CachePath = CachePathForHost();
 		}
-		if (!m_CacheLoaded && m_CachePath != "" && !m.disableCache)
+		if (m_CachePath != "" && !m.disableCache)
 		{
-			LoadCache();
+			LoadCache(m.cacheKey);
 		}
 
 		for (int i = 0; i < m.Count(); i++)
@@ -1225,19 +1239,32 @@ class DZOMS_ClientWorld
 			for (int j = 0; j < m.Count(); j++)
 			{
 				string hash = m.hashes.Get(j);
-				DZOMS_Batch cached;
-				if (m_Cache.Find(hash, cached))
+				int range;
+				if (m_Cache.Find(hash, range))
 				{
-					cached.index = j;
-					m_Batches.Get(j).SetData(cached);
-					AddKnownTypes(cached);
 					m_Cache.Remove(hash);
+					DZOMS_Batch cached = DZOMS_BatchHasher.Decode(m_CacheWords, m_CacheStarts.Get(range), m_CacheCounts.Get(range));
+					if (!cached)
+					{
+						continue;
+					}
+					cached.index = j;
+					array<int> cachedWords = new array<int>();
+					for (int w = 0; w < m_CacheCounts.Get(range); w++)
+					{
+						cachedWords.Insert(m_CacheWords.Get(m_CacheStarts.Get(range) + w));
+					}
+					m_Batches.Get(j).SetData(cached, cachedWords);
+					AddKnownTypes(cached);
 					m_Received++;
 					m_FromCache++;
 				}
 			}
 		}
 		m_Cache.Clear();
+		m_CacheWords.Clear();
+		m_CacheStarts.Clear();
+		m_CacheCounts.Clear();
 
 		DZOMS_Log.Info("manifest: " + m.Count().ToString() + " batches, " + m_FromCache.ToString() + " from the cache");
 		if (m_Received >= m.Count())
@@ -1262,9 +1289,11 @@ class DZOMS_ClientWorld
 		}
 
 		bool good = b.IsValid();
+		array<int> batchWords;
 		if (good)
 		{
-			string hash = DZOMS_BatchHasher.Hash(b);
+			batchWords = DZOMS_BatchHasher.Words(b);
+			string hash = DZOMS_Sha256.HashWords(batchWords);
 			good = hash == m_Manifest.hashes.Get(index);
 		}
 		if (!good)
@@ -1277,7 +1306,7 @@ class DZOMS_ClientWorld
 			return;
 		}
 
-		cb.SetData(b);
+		cb.SetData(b, batchWords);
 		AddKnownTypes(b);
 		m_Received++;
 		m_Downloaded++;
@@ -1306,14 +1335,14 @@ class DZOMS_ClientWorld
 		{
 			return;
 		}
-		array<ref DZOMS_Batch> list = new array<ref DZOMS_Batch>();
+		array<ref array<int>> list = new array<ref array<int>>();
 		for (int i = 0; i < m_Batches.Count(); i++)
 		{
-			list.Insert(m_Batches.Get(i).data);
+			list.Insert(m_Batches.Get(i).words);
 		}
 		DZOMS_Config.MakeDirs(DZOMS_Config.PROFILE_DIR);
 		MakeDirectory(DZOMS_Config.PROFILE_DIR + "/cache");
-		if (DZOMS_Cache.Write(m_CachePath, list))
+		if (DZOMS_Cache.Write(m_CachePath, m_Manifest.cacheKey, DZOMS_CacheKey.RandomWords(3), list))
 		{
 			DZOMS_Log.Info("cache: wrote " + m_CachePath);
 		}
