@@ -75,8 +75,139 @@ class DZOMS_Test_Config
 		string dir = DZOMS_T.DIR + "/config/" + name;
 		DeleteFile(dir + "/config.json");
 		DeleteFile(dir + "/config.json.v1.bak");
+		DeleteFile(dir + "/" + DZOMS_CacheKey.FILE);
 		MakeDirectory(dir);
 		return dir;
+	}
+
+	static void WriteKeyFile(string path, array<int> words)
+	{
+		FileSerializer ser = new FileSerializer();
+		if (ser.Open(path, FileMode.WRITE))
+		{
+			ser.Write(words);
+			ser.Close();
+		}
+	}
+
+	static bool SameKey(array<int> a, array<int> b)
+	{
+		if (!a || !b || a.Count() != b.Count())
+		{
+			return false;
+		}
+		for (int i = 0; i < a.Count(); i++)
+		{
+			if (a.Get(i) != b.Get(i))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// the words of "00 01 02 .. 1f" read big endian (the RFC test key of Test_ChaCha20 reads the same bytes little endian)
+	static array<int> BigEndianKey()
+	{
+		return {66051, 67438087, 134810123, 202182159, 269554195, 336926231, 404298267, 471670303};
+	}
+
+	static bool AllZero(array<int> w)
+	{
+		for (int i = 0; i < w.Count(); i++)
+		{
+			if (w.Get(i) != 0)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static void CacheKeyTests()
+	{
+		DZOMS_T.Suite("cachekey");
+		string hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+		array<int> key = new array<int>();
+		DZOMS_T.Check(DZOMS_CacheKey.Parse(hex, key), "Parse of 00..1f");
+		DZOMS_T.EqInt(key.Count(), 8, "parsed word count");
+		DZOMS_T.Check(SameKey(key, BigEndianKey()), "parsed words are 00..1f big endian");
+		if (key.Count() == 8)
+		{
+			DZOMS_T.EqInt(key.Get(0), 66051, "first word big endian");
+		}
+		hex.ToUpper();
+		DZOMS_T.Check(DZOMS_CacheKey.Parse(hex, key), "upper case accepted");
+		DZOMS_T.EqInt(key.Count(), 8, "upper case: 8 words");
+		DZOMS_T.Check(DZOMS_CacheKey.Parse("ffffffff00000000ffffffff00000000ffffffff00000000ffffffff00000000", key), "high bit words parse");
+		if (key.Count() == 8)
+		{
+			DZOMS_T.EqInt(key.Get(0), -1, "ffffffff is -1");
+			DZOMS_T.EqInt(key.Get(1), 0, "00000000 is 0");
+		}
+		string good = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+		DZOMS_T.Check(!DZOMS_CacheKey.Parse(good.Substring(0, 63), key), "63 characters");
+		DZOMS_T.EqInt(key.Count(), 0, "63 characters: key empty");
+		DZOMS_T.Check(!DZOMS_CacheKey.Parse(good + "0", key), "65 characters");
+		DZOMS_T.EqInt(key.Count(), 0, "65 characters: key empty");
+		DZOMS_T.Check(!DZOMS_CacheKey.Parse("g" + good.Substring(1, 63), key), "a g");
+		DZOMS_T.EqInt(key.Count(), 0, "a g: key empty");
+		DZOMS_T.Check(!DZOMS_CacheKey.Parse(" " + good.Substring(1, 63), key), "a space");
+		DZOMS_T.EqInt(key.Count(), 0, "a space: key empty");
+		DZOMS_T.Check(!DZOMS_CacheKey.Parse("", key), "empty string");
+
+		array<int> r1 = DZOMS_CacheKey.RandomWords(8);
+		array<int> r2 = DZOMS_CacheKey.RandomWords(8);
+		DZOMS_T.EqInt(r1.Count(), 8, "RandomWords(8) count");
+		DZOMS_T.EqInt(r2.Count(), 8, "second RandomWords(8) count");
+		DZOMS_T.Check(!AllZero(r1) && !AllZero(r2), "random words not all zero");
+		DZOMS_T.Check(!SameKey(r1, r2), "two random keys differ");
+		DZOMS_T.EqInt(DZOMS_CacheKey.RandomWords(3).Count(), 3, "RandomWords(3) count");
+		DZOMS_T.EqInt(DZOMS_CacheKey.RandomWords(16).Count(), 16, "RandomWords(16) count");
+
+		// fresh dir: key generated and written, the same on the next load
+		string dir = CaseDir("key_fresh");
+		DZOMS_Config c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(FileExist(dir + "/" + DZOMS_CacheKey.FILE), "cachekey.bin written");
+		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8, "generated key has 8 words");
+		DZOMS_Config c2 = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(SameKey(c.m_CacheKey, c2.m_CacheKey), "second load gives the same key");
+
+		// broken key files are replaced
+		dir = CaseDir("key_short");
+		array<int> three = {1, 2, 3};
+		WriteKeyFile(dir + "/" + DZOMS_CacheKey.FILE, three);
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8, "3-word file: 8 words");
+		c2 = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(SameKey(c.m_CacheKey, c2.m_CacheKey), "3-word file: replaced, later load returns the new key");
+
+		dir = CaseDir("key_zero");
+		array<int> zeros = {0, 0, 0, 0, 0, 0, 0, 0};
+		WriteKeyFile(dir + "/" + DZOMS_CacheKey.FILE, zeros);
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8 && !AllZero(c.m_CacheKey), "all-zero file: new key");
+		c2 = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(SameKey(c.m_CacheKey, c2.m_CacheKey), "all-zero file: replaced, later load returns the new key");
+
+		dir = CaseDir("key_garbage");
+		WriteText(dir + "/" + DZOMS_CacheKey.FILE, "this is not a key file");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8 && !AllZero(c.m_CacheKey), "text file: new key");
+
+		// a set key is used and no file is made
+		dir = CaseDir("key_set");
+		WriteText(dir + "/config.json", "{ \"cacheKey\": \"" + good + "\" }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(SameKey(c.m_CacheKey, BigEndianKey()), "configured key is used");
+		DZOMS_T.Check(!FileExist(dir + "/" + DZOMS_CacheKey.FILE), "configured key: no file");
+
+		// an invalid key is reported and a generated one used
+		dir = CaseDir("key_bad");
+		WriteText(dir + "/config.json", "{ \"cacheKey\": \"xyz\" }");
+		c = DZOMS_Config.Load(dir);
+		DZOMS_T.Check(!c.m_LoadFailed, "invalid cacheKey: config not failed");
+		DZOMS_T.Check(c.m_CacheKey != null && c.m_CacheKey.Count() == 8 && !AllZero(c.m_CacheKey), "invalid cacheKey: generated key");
 	}
 
 	static void Run()
@@ -285,5 +416,7 @@ class DZOMS_Test_Config
 		DZOMS_T.EqInt(c.configVersion, 2, "gap: stays at the version reached");
 		DZOMS_T.Check(!c.m_MigrationWritten, "gap: not written");
 		DZOMS_T.Eq(ReadText(dir + "/config.json"), before, "gap: file text unchanged");
+
+		CacheKeyTests();
 	}
 }

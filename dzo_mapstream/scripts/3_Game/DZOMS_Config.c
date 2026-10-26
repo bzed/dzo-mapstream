@@ -41,6 +41,8 @@ class DZOMS_Config
 	float proxyDistance;
 	int batchSize;
 	bool disableCache;
+	// 64 hex characters; "" = generated once and kept in cachekey.bin (DESIGN 12.4)
+	string cacheKey;
 	bool debugLog;
 	// proximity networking (DESIGN 13): a networked copy of the map objects around a player who can use them
 	// (climbing, sounds); on unless disabled (objects then stay local and cannot be climbed)
@@ -55,6 +57,10 @@ class DZOMS_Config
 
 	[NonSerialized()]
 	bool m_LoadFailed;
+
+	// the 8 key words resolved by Load()
+	[NonSerialized()]
+	ref array<int> m_CacheKey;
 
 	// the file has a newer version than this mod knows: used as it is, never written
 	[NonSerialized()]
@@ -316,6 +322,7 @@ class DZOMS_Config
 			c.Migrate(path, migration);
 		}
 		c.Normalize();
+		c.m_CacheKey = DZOMS_CacheKey.Resolve(c.cacheKey, dir);
 		return c;
 	}
 }
